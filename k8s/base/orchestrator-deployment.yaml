@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: symphony-orchestrator
+  namespace: symphony
+  labels:
+    app: symphony-orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: symphony-orchestrator
+  template:
+    metadata:
+      labels:
+        app: symphony-orchestrator
+    spec:
+      initContainers:
+        - name: init-orchestrator-ssh
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              cp /ssh-src/* /ssh-dst/
+              chmod 600 /ssh-dst/id_ed25519
+              chmod 644 /ssh-dst/known_hosts /ssh-dst/config
+              chown -R 10001:10001 /ssh-dst
+          volumeMounts:
+            - name: orchestrator-ssh-secret
+              mountPath: /ssh-src
+              readOnly: true
+            - name: orchestrator-ssh
+              mountPath: /ssh-dst
+      containers:
+        - name: orchestrator
+          image: symphony-orchestrator
+          imagePullPolicy: IfNotPresent
+          args: ["start", "./WORKFLOW.md", "--port", "4000"]
+          ports:
+            - name: http
+              containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: symphony-secrets
+          env:
+            - name: LANG
+              value: C.UTF-8
+            - name: ELIXIR_ERL_OPTIONS
+              value: +fnu
+          volumeMounts:
+            - name: workflow
+              mountPath: /app/WORKFLOW.md
+              subPath: WORKFLOW.md
+              readOnly: true
+            - name: orchestrator-ssh
+              mountPath: /home/symphony/.ssh
+              readOnly: true
+      volumes:
+        - name: workflow
+          configMap:
+            name: symphony-workflow
+            items:
+              - key: WORKFLOW.md
+                path: WORKFLOW.md
+        - name: orchestrator-ssh
+          emptyDir: {}
+        - name: orchestrator-ssh-secret
+          secret:
+            secretName: symphony-orchestrator-ssh
+            defaultMode: 0400

@@ -1,0 +1,44 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: symphony-k8s
+build:
+  local:
+    push: false
+  artifacts:
+    - image: symphony-orchestrator
+      context: .
+      docker:
+        dockerfile: docker/orchestrator.Dockerfile
+    - image: symphony-worker
+      context: .
+      docker:
+        dockerfile: docker/worker.Dockerfile
+manifests:
+  rawYaml:
+    - k8s/base/namespace.yaml
+    - k8s/base/workflow-configmap.yaml
+    - k8s/base/orchestrator-deployment.yaml
+    - k8s/base/orchestrator-service.yaml
+    - k8s/base/worker-headless-service.yaml
+    - k8s/base/worker-statefulset.yaml
+    - k8s/base/networkpolicy.yaml
+deploy:
+  kubectl:
+    defaultNamespace: symphony
+profiles:
+  - name: dev
+    activation:
+      - command: dev
+    build:
+      local:
+        push: false
+  - name: prod
+    build:
+      local:
+        push: true
+    deploy:
+      kubectl:
+        flags:
+          apply:
+            - --prune=false

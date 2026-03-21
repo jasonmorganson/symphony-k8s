@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: symphony-orchestrator
+  namespace: symphony
+  labels:
+    app: symphony-orchestrator
+spec:
+  type: ClusterIP
+  selector:
+    app: symphony-orchestrator
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http

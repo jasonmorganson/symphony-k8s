@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: symphony-worker
+  namespace: symphony
+  labels:
+    app: symphony-worker
+spec:
+  serviceName: symphony-worker
+  replicas: 3
+  selector:
+    matchLabels:
+      app: symphony-worker
+  template:
+    metadata:
+      labels:
+        app: symphony-worker
+    spec:
+      containers:
+        - name: worker
+          image: symphony-worker
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: ssh
+              containerPort: 22
+          envFrom:
+            - secretRef:
+                name: symphony-secrets
+          volumeMounts:
+            - name: workspaces
+              mountPath: /srv/symphony/workspaces
+            - name: worker-hostkeys
+              mountPath: /etc/ssh/keys
+              readOnly: true
+            - name: worker-authorized-keys
+              mountPath: /etc/ssh/authorized-keys/authorized_keys
+              subPath: authorized_keys
+              readOnly: true
+      volumes:
+        - name: worker-hostkeys
+          secret:
+            secretName: symphony-worker-hostkeys
+            defaultMode: 0600
+            items:
+              - key: ssh_host_ed25519_key
+                path: ssh_host_ed25519_key
+              - key: ssh_host_ed25519_key.pub
+                path: ssh_host_ed25519_key.pub
+        - name: worker-authorized-keys
+          secret:
+            secretName: symphony-worker-authorized-keys
+            defaultMode: 0400
+            items:
+              - key: authorized_keys
+                path: authorized_keys
+  volumeClaimTemplates:
+    - metadata:
+        name: workspaces
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi

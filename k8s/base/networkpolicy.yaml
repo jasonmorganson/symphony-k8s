@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-ssh-only-from-orchestrator
+  namespace: symphony
+spec:
+  podSelector:
+    matchLabels:
+      app: symphony-worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: symphony-orchestrator
+      ports:
+        - protocol: TCP
+          port: 22
