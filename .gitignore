@@ -1,0 +1,3 @@
+generated/
+k8s/base/secrets.yaml
+rendered.yaml

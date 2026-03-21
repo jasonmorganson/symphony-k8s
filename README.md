@@ -27,38 +27,66 @@ A Deployment does not guarantee stable pod identity or volume continuity, while 
 
 ## Setup
 
-1. Quick smoke test with placeholders (not for real runs):
+### Automated local bootstrap (recommended)
+
+1. Export required configuration:
 
 ```bash
-kubectl apply -f k8s/base/secrets.example.yaml
+export LINEAR_API_KEY="lin_xxx"
+export OPENAI_API_KEY="sk-xxx"
+export LINEAR_PROJECT_SLUG="your-linear-project-slug"
+export REPO_URL="https://github.com/your-org/your-repo.git"
 ```
 
-2. Recommended: copy and edit secrets:
+2. Run bootstrap:
 
 ```bash
-cp k8s/base/secrets.example.yaml k8s/base/secrets.yaml
-# Edit placeholders in k8s/base/secrets.yaml
+scripts/bootstrap-local.sh
 ```
 
-3. Apply edited secrets:
+What bootstrap does automatically:
+
+- creates/reuses SSH keys under `generated/ssh/`
+- creates/updates all required secrets:
+  - `symphony-secrets`
+  - `symphony-orchestrator-ssh`
+  - `symphony-worker-authorized-keys`
+  - `symphony-worker-hostkeys`
+- renders and applies `symphony-workflow` ConfigMap with your `LINEAR_PROJECT_SLUG` and `REPO_URL`
+- runs `skaffold run -p dev`
+- performs an orchestrator -> worker SSH smoke test
+
+Optional flags:
 
 ```bash
-kubectl apply -f k8s/base/secrets.yaml
+scripts/bootstrap-local.sh --profile prod --namespace symphony
+scripts/bootstrap-local.sh --skip-skaffold
 ```
 
-4. Start dev loop:
+### Manual setup (minimum required)
+
+You still need to provide environment-specific values:
+
+- valid `LINEAR_API_KEY`
+- valid `OPENAI_API_KEY`
+- correct `LINEAR_PROJECT_SLUG`
+- target repository URL (`REPO_URL`)
+
+Additional commands:
+
+Start dev loop:
 
 ```bash
 skaffold dev
 ```
 
-5. One-shot prod-style deploy:
+One-shot prod-style deploy:
 
 ```bash
 skaffold run -p prod
 ```
 
-6. Render manifests only:
+Render manifests only:
 
 ```bash
 skaffold render > rendered.yaml
