@@ -46,6 +46,7 @@ skaffold dev
 
 What Skaffold does automatically:
 
+- runs `scripts/generate-skaffold-inputs.sh` to materialize the workflow, SSH, and secret inputs
 - generates `k8s/base/generated/skaffold/` inputs from your environment
 - builds `symphony-orchestrator` and `symphony-worker`
 - renders the Kustomize base under `k8s/base/`
