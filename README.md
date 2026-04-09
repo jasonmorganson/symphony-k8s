@@ -56,6 +56,7 @@ What Skaffold does automatically:
 - creates the workflow ConfigMap and required Secrets from the generated files
 - deploys the orchestrator, workers, and services into `symphony`
 - applies pod disruption budgets, ingress, and scheduling preferences
+- forwards `symphony-orchestrator` to `http://127.0.0.1:4000` during `skaffold dev`
 
 One-shot prod-style deploy:
 

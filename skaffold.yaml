@@ -30,6 +30,12 @@ deploy:
     hooks:
       before:
         - host: *generate-config
+portForward:
+  - resourceType: service
+    resourceName: symphony-orchestrator
+    namespace: symphony
+    port: 4000
+    localPort: 4000
 profiles:
   - name: dev
     activation:
