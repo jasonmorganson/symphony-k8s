@@ -27,6 +27,9 @@ A Deployment does not guarantee stable pod identity or volume continuity, while 
 - `workflow/WORKFLOW.md` AG2-derived workflow template customized for Symphony
 - `k8s/base/generated/skaffold/` Skaffold-generated workflow, SSH, and secret inputs
 
+Docker builds use a tight root-level `.dockerignore` so workflow and generated
+Kubernetes inputs do not constantly invalidate the images.
+
 ## Setup
 
 ### Skaffold-first setup
