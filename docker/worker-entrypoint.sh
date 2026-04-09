@@ -3,6 +3,7 @@ set -euo pipefail
 
 mkdir -p /srv/symphony/workspaces /home/symphony/.ssh /run/sshd
 chown -R symphony:symphony /srv/symphony
+chmod 2775 /srv/symphony/workspaces
 chown symphony:symphony /home/symphony /home/symphony/.ssh
 
 if [[ -f /etc/ssh/authorized-keys/authorized_keys ]]; then
