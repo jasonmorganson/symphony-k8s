@@ -22,6 +22,19 @@ secrets_dir="$root/secrets"
 ssh_dir="$root/ssh"
 mkdir -p "$workflow_dir" "$secrets_dir" "$ssh_dir"
 
+write_if_changed() {
+  local target="$1"
+  local content="$2"
+  local tmp
+  tmp="$(mktemp)"
+  printf '%s\n' "$content" > "$tmp"
+  if [[ -f "$target" ]] && cmp -s "$tmp" "$target"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  mv "$tmp" "$target"
+}
+
 template_file="$ROOT_DIR/workflow/WORKFLOW.md"
 if [[ ! -f "$template_file" ]]; then
   printf 'Missing workflow template: %s\n' "$template_file" >&2
@@ -45,24 +58,27 @@ if [[ -z "${host_key_type:-}" || -z "${host_key_body:-}" ]]; then
   exit 1
 fi
 
-cat > "$ssh_dir/known_hosts" <<EOF
+write_if_changed "$ssh_dir/known_hosts" "$(cat <<EOF
 symphony-worker-0.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
 symphony-worker-1.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
 symphony-worker-2.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
 EOF
+)"
 
-cat > "$ssh_dir/config" <<'EOF'
+write_if_changed "$ssh_dir/config" "$(cat <<'EOF'
 Host symphony-worker-*.symphony-worker.symphony.svc.cluster.local
   User symphony
   IdentityFile /home/symphony/.ssh/id_ed25519
   StrictHostKeyChecking yes
   UserKnownHostsFile /home/symphony/.ssh/known_hosts
 EOF
+)"
 
-cat > "$secrets_dir/symphony-secrets.env" <<EOF
+write_if_changed "$secrets_dir/symphony-secrets.env" "$(cat <<EOF
 LINEAR_API_KEY=${LINEAR_API_KEY}
 OPENAI_API_KEY=${OPENAI_API_KEY}
 EOF
+)"
 
 escape_sed_replacement() {
   printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
@@ -73,4 +89,4 @@ rendered_workflow="$(sed \
   -e "s|__REPO_URL__|$(escape_sed_replacement "$REPO_URL")|g" \
   "$template_file")"
 
-printf '%s\n' "$rendered_workflow" > "$workflow_dir/WORKFLOW.md"
+write_if_changed "$workflow_dir/WORKFLOW.md" "$rendered_workflow"
