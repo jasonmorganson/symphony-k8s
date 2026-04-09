@@ -8,8 +8,11 @@ resources:
   - orchestrator-deployment.yaml
   - orchestrator-service.yaml
   - orchestrator-public-service.yaml
+  - orchestrator-ingress.yaml
+  - orchestrator-pdb.yaml
   - worker-headless-service.yaml
   - worker-statefulset.yaml
+  - worker-pdb.yaml
   - networkpolicy.yaml
 
 configMapGenerator:

@@ -16,6 +16,32 @@ spec:
       labels:
         app: symphony-worker
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: symphony-worker
+                topologyKey: kubernetes.io/hostname
+            - weight: 75
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: symphony-orchestrator
+                topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: symphony-worker
       containers:
         - name: worker
           image: symphony-worker
@@ -26,6 +52,8 @@ spec:
           envFrom:
             - secretRef:
                 name: symphony-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
           volumeMounts:
             - name: workspaces
               mountPath: /srv/symphony/workspaces
