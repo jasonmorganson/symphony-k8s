@@ -22,6 +22,12 @@ secrets_dir="$root/secrets"
 ssh_dir="$root/ssh"
 mkdir -p "$workflow_dir" "$secrets_dir" "$ssh_dir"
 
+template_file="$ROOT_DIR/k8s/base/workflow-configmap.yaml"
+if [[ ! -f "$template_file" ]]; then
+  printf 'Missing workflow template: %s\n' "$template_file" >&2
+  exit 1
+fi
+
 orchestrator_key="$ssh_dir/orchestrator_id_ed25519"
 worker_host_key="$ssh_dir/ssh_host_ed25519_key"
 
@@ -58,45 +64,19 @@ LINEAR_API_KEY=${LINEAR_API_KEY}
 OPENAI_API_KEY=${OPENAI_API_KEY}
 EOF
 
-cat > "$workflow_dir/WORKFLOW.md" <<EOF
----
-tracker:
-  kind: linear
-  project_slug: ${LINEAR_PROJECT_SLUG}
-  api_key: \$LINEAR_API_KEY
+escape_sed_replacement() {
+  printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
+}
 
-workspace:
-  root: /srv/symphony/workspaces
+workflow_template="$(
+  awk '
+    /^  WORKFLOW.md: \|$/ { in_block = 1; next }
+    in_block { sub(/^    /, ""); print }
+  ' "$template_file"
+)"
 
-worker:
-  ssh_hosts:
-    - symphony-worker-0.symphony-worker.symphony.svc.cluster.local
-    - symphony-worker-1.symphony-worker.symphony.svc.cluster.local
-    - symphony-worker-2.symphony-worker.symphony.svc.cluster.local
-  max_concurrent_agents_per_host: 2
+rendered_workflow="$(printf '%s\n' "$workflow_template" | sed \
+  -e "s|__LINEAR_PROJECT_SLUG__|$(escape_sed_replacement "$LINEAR_PROJECT_SLUG")|g" \
+  -e "s|__REPO_URL__|$(escape_sed_replacement "$REPO_URL")|g")"
 
-agent:
-  max_concurrent_agents: 6
-  max_turns: 20
-
-codex:
-  command: /usr/local/bin/codex app-server
-
-hooks:
-  after_create: |
-    set -euo pipefail
-    git clone ${REPO_URL} repo
-    cd repo
-    if [ -f package-lock.json ]; then
-      npm ci
-    elif [ -f pnpm-lock.yaml ]; then
-      corepack enable && pnpm install --frozen-lockfile
-    elif [ -f yarn.lock ]; then
-      corepack enable && yarn install --frozen-lockfile
-    fi
----
-
-# Symphony Workflow
-
-Update \`tracker.project_slug\` and clone URL placeholders before production use.
-EOF
+printf '%s\n' "$rendered_workflow" > "$workflow_dir/WORKFLOW.md"

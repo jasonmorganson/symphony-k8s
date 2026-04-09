@@ -46,7 +46,8 @@ skaffold dev
 
 What Skaffold does automatically:
 
-- runs `scripts/generate-skaffold-inputs.sh` to materialize the workflow, SSH, and secret inputs
+- runs `scripts/generate-skaffold-inputs.sh` to render the dynamic workflow fields and SSH/secret inputs
+- keeps the static workflow text in `k8s/base/workflow-configmap.yaml`
 - generates `k8s/base/generated/skaffold/` inputs from your environment
 - builds `symphony-orchestrator` and `symphony-worker`
 - renders the Kustomize base under `k8s/base/`
@@ -71,7 +72,7 @@ If you want to inspect the generated inputs, they land under:
 k8s/base/generated/skaffold/
 ```
 
-There are no standalone helper scripts in the deploy path. Skaffold generates the SSH material and workflow inputs directly from your environment.
+There are no standalone helper scripts in the deploy path. Skaffold renders the workflow template and generates the SSH material directly from your environment.
 
 Access the orchestrator UI/API from your host:
 
