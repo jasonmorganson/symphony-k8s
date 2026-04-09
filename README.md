@@ -24,7 +24,7 @@ A Deployment does not guarantee stable pod identity or volume continuity, while 
 
 - `docker/` image definitions and SSH runtime config
 - `k8s/base/` Kubernetes manifests
-- `workflow/WORKFLOW.md` static workflow template
+- `workflow/WORKFLOW.md` AG2-derived workflow template customized for Symphony
 - `k8s/base/generated/skaffold/` Skaffold-generated workflow, SSH, and secret inputs
 
 ## Setup
