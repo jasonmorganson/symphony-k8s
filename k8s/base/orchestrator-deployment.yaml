@@ -36,7 +36,13 @@ spec:
         - name: orchestrator
           image: symphony-orchestrator
           imagePullPolicy: IfNotPresent
-          args: ["start", "./WORKFLOW.md", "--port", "4000"]
+          args:
+            - "eval"
+            - "SymphonyElixir.CLI.main(System.argv())"
+            - "--i-understand-that-this-will-be-running-without-the-usual-guardrails"
+            - "--port"
+            - "4000"
+            - "./WORKFLOW.md"
           ports:
             - name: http
               containerPort: 4000

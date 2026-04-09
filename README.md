@@ -104,6 +104,8 @@ For remote clusters, use the `symphony-orchestrator-public` `LoadBalancer` servi
 kubectl -n symphony port-forward svc/symphony-orchestrator 4000:4000
 ```
 
+On OrbStack, the `LoadBalancer` object may show an external IP but still not be reachable from the host. In that environment, `port-forward` is the reliable access path.
+
 ## Required Secrets
 
 - `symphony-secrets`
