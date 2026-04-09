@@ -23,7 +23,6 @@ A Deployment does not guarantee stable pod identity or volume continuity, while 
 
 - `docker/` image definitions and SSH runtime config
 - `k8s/base/` Kubernetes manifests
-- `scripts/` helper scripts for SSH key material
 - `k8s/base/generated/skaffold/` Skaffold-generated workflow, SSH, and secret inputs
 
 ## Setup
@@ -70,6 +69,8 @@ If you want to inspect the generated inputs, they land under:
 ```bash
 k8s/base/generated/skaffold/
 ```
+
+There are no standalone helper scripts in the deploy path. Skaffold generates the SSH material and workflow inputs directly from your environment.
 
 Access the orchestrator UI/API from your host:
 
