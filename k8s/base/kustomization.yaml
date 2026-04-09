@@ -10,6 +10,7 @@ resources:
   - orchestrator-public-service.yaml
   - orchestrator-ingress.yaml
   - orchestrator-pdb.yaml
+  - orchestrator-workspaces-pvc.yaml
   - worker-headless-service.yaml
   - worker-statefulset.yaml
   - worker-pdb.yaml
