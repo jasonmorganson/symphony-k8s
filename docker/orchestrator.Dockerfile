@@ -49,8 +49,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     bash \
+    bubblewrap \
+    nodejs \
+    npm \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Codex CLI in the orchestrator runtime, since Symphony launches the
+# agent command from this container.
+RUN npm install -g @openai/codex
 
 RUN useradd --create-home --shell /bin/bash --uid 10001 symphony
 
