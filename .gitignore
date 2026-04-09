@@ -1,3 +1,4 @@
 generated/
+k8s/base/generated/
 k8s/base/secrets.yaml
 rendered.yaml
