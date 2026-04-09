@@ -172,6 +172,11 @@ hooks:
 ---
 WF
 
+WORKFLOW_CONFIGMAP_YAML="$KEY_DIR/symphony-workflow.yaml"
+kubectl create configmap symphony-workflow \
+  --from-file=WORKFLOW.md="$WORKFLOW_FILE" \
+  --dry-run=client -o yaml > "$WORKFLOW_CONFIGMAP_YAML"
+
 kubectl apply -f "$ROOT_DIR/k8s/base/namespace.yaml"
 
 kubectl -n "$NAMESPACE" create secret generic symphony-secrets \
@@ -194,13 +199,15 @@ kubectl -n "$NAMESPACE" create secret generic symphony-worker-hostkeys \
   --from-file=ssh_host_ed25519_key.pub="$WORKER_HOST_KEY.pub" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl -n "$NAMESPACE" create configmap symphony-workflow \
-  --from-file=WORKFLOW.md="$WORKFLOW_FILE" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
 if [[ "$RUN_SKAFFOLD" == "true" ]]; then
   (cd "$ROOT_DIR" && skaffold run -p "$PROFILE" --tail=false)
 fi
+
+# Skaffold deploys the repository manifest, so re-apply the generated workflow
+# ConfigMap afterward to ensure env-derived values win over the placeholder.
+kubectl apply -f "$WORKFLOW_CONFIGMAP_YAML"
+kubectl -n "$NAMESPACE" rollout restart deploy/symphony-orchestrator
+kubectl -n "$NAMESPACE" rollout status deploy/symphony-orchestrator --timeout=120s
 
 ORCH_POD="$(kubectl -n "$NAMESPACE" get pods -l app=symphony-orchestrator -o jsonpath='{.items[0].metadata.name}')"
 kubectl -n "$NAMESPACE" exec "$ORCH_POD" -- sh -lc \

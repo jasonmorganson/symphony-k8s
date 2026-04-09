@@ -53,6 +53,7 @@ What bootstrap does automatically:
   - `symphony-worker-authorized-keys`
   - `symphony-worker-hostkeys`
 - renders and applies `symphony-workflow` ConfigMap with your `LINEAR_PROJECT_SLUG` and `REPO_URL`
+- reapplies the generated workflow after Skaffold so the live cluster does not keep the placeholder repo manifest
 - runs `skaffold run -p dev`
 - performs an orchestrator -> worker SSH smoke test
 
