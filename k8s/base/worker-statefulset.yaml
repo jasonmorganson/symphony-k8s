@@ -59,6 +59,23 @@ spec:
           volumeMounts:
             - name: workspaces
               mountPath: /srv/symphony/workspaces
+        - name: init-worker-hostkeys
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              cp /ssh-src/* /ssh-dst/
+              chmod 600 /ssh-dst/ssh_host_ed25519_key
+              chmod 644 /ssh-dst/ssh_host_ed25519_key.pub
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: worker-hostkeys-secret
+              mountPath: /ssh-src
+              readOnly: true
+            - name: worker-hostkeys
+              mountPath: /ssh-dst
       containers:
         - name: worker
           image: symphony-worker
@@ -82,7 +99,7 @@ spec:
               subPath: authorized_keys
               readOnly: true
       volumes:
-        - name: worker-hostkeys
+        - name: worker-hostkeys-secret
           secret:
             secretName: symphony-worker-hostkeys
             defaultMode: 0600
@@ -91,6 +108,8 @@ spec:
                 path: ssh_host_ed25519_key
               - key: ssh_host_ed25519_key.pub
                 path: ssh_host_ed25519_key.pub
+        - name: worker-hostkeys
+          emptyDir: {}
         - name: worker-authorized-keys
           secret:
             secretName: symphony-worker-authorized-keys
