@@ -22,7 +22,7 @@ secrets_dir="$root/secrets"
 ssh_dir="$root/ssh"
 mkdir -p "$workflow_dir" "$secrets_dir" "$ssh_dir"
 
-template_file="$ROOT_DIR/k8s/base/workflow-configmap.yaml"
+template_file="$ROOT_DIR/workflow/WORKFLOW.md"
 if [[ ! -f "$template_file" ]]; then
   printf 'Missing workflow template: %s\n' "$template_file" >&2
   exit 1
@@ -68,15 +68,9 @@ escape_sed_replacement() {
   printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
 
-workflow_template="$(
-  awk '
-    /^  WORKFLOW.md: \|$/ { in_block = 1; next }
-    in_block { sub(/^    /, ""); print }
-  ' "$template_file"
-)"
-
-rendered_workflow="$(printf '%s\n' "$workflow_template" | sed \
+rendered_workflow="$(sed \
   -e "s|__LINEAR_PROJECT_SLUG__|$(escape_sed_replacement "$LINEAR_PROJECT_SLUG")|g" \
-  -e "s|__REPO_URL__|$(escape_sed_replacement "$REPO_URL")|g")"
+  -e "s|__REPO_URL__|$(escape_sed_replacement "$REPO_URL")|g" \
+  "$template_file")"
 
 printf '%s\n' "$rendered_workflow" > "$workflow_dir/WORKFLOW.md"
