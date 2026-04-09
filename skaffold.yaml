@@ -20,6 +20,7 @@ manifests:
     - k8s/base/workflow-configmap.yaml
     - k8s/base/orchestrator-deployment.yaml
     - k8s/base/orchestrator-service.yaml
+    - k8s/base/orchestrator-public-service.yaml
     - k8s/base/worker-headless-service.yaml
     - k8s/base/worker-statefulset.yaml
     - k8s/base/networkpolicy.yaml

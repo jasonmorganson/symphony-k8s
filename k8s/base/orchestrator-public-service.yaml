@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: symphony-orchestrator-public
+  namespace: symphony
+  labels:
+    app: symphony-orchestrator
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    app: symphony-orchestrator
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

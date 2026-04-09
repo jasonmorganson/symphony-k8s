@@ -92,6 +92,18 @@ Render manifests only:
 skaffold render > rendered.yaml
 ```
 
+Access the orchestrator UI/API from your host:
+
+```text
+http://127.0.0.1:4000
+```
+
+For remote clusters, use the `symphony-orchestrator-public` `LoadBalancer` service on port `80`. In clusters without a provisioned external IP, port-forward the internal `ClusterIP` service:
+
+```bash
+kubectl -n symphony port-forward svc/symphony-orchestrator 4000:4000
+```
+
 ## Required Secrets
 
 - `symphony-secrets`
