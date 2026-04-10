@@ -72,12 +72,14 @@ RUN useradd --create-home --shell /bin/bash --uid 10001 symphony
 
 WORKDIR /app
 COPY --from=build /tmp/symphony-release /app
+COPY docker/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 RUN if [ -x /app/bin/symphony_elixir ] && [ ! -e /app/bin/symphony ]; then \
       ln -s /app/bin/symphony_elixir /app/bin/symphony; \
     fi
 RUN mkdir -p /home/symphony/.ssh && chown -R symphony:symphony /home/symphony /app
+RUN chmod 0755 /usr/local/bin/orchestrator-entrypoint.sh
 
 USER symphony
 EXPOSE 4000
 
-ENTRYPOINT ["/app/bin/symphony"]
+ENTRYPOINT ["/usr/local/bin/orchestrator-entrypoint.sh"]
