@@ -26,7 +26,7 @@ A Deployment does not guarantee stable pod identity or volume continuity, while 
 
 - `docker/runtime-base/`, `docker/release/`, `docker/orchestrator/`, `docker/worker/` image definitions
 - `docker/common/` shared Docker runtime helpers
-- `config/sshd_config` SSH daemon config for workers
+- `config/sshd_config.d/worker.conf` SSH daemon config drop-in for workers
 - `k8s/base/` Kubernetes manifests
 - `workflow/WORKFLOW.md` AG2-derived workflow template customized for Symphony
 - `k8s/base/generated/skaffold/` Skaffold-generated workflow, SSH, and secret inputs

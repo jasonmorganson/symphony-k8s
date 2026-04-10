@@ -8,7 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /srv/symphony/workspaces /etc/ssh/keys /run/sshd \
     && chown -R symphony:symphony /srv/symphony /etc/ssh/keys
 
-COPY config/sshd_config /etc/ssh/sshd_config
+RUN mkdir -p /etc/ssh/sshd_config.d
+COPY config/sshd_config.d/worker.conf /etc/ssh/sshd_config.d/worker.conf
 COPY docker/worker/entrypoint.sh /usr/local/bin/worker-entrypoint.sh
 RUN chmod +x /usr/local/bin/worker-entrypoint.sh
 
