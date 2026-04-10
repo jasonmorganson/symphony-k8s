@@ -21,6 +21,14 @@ workspace:
   root: /srv/symphony/workspaces
 hooks:
   after_create: |
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+      case "__REPO_URL__" in
+        https://github.com/*|http://github.com/*)
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "http://github.com/"
+          ;;
+      esac
+    fi
     git clone --depth 1 __REPO_URL__ .
     if command -v mise >/dev/null 2>&1; then
       mise trust .

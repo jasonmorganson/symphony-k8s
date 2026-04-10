@@ -77,6 +77,7 @@ EOF
 write_if_changed "$secrets_dir/symphony-secrets.env" "$(cat <<EOF
 LINEAR_API_KEY=${LINEAR_API_KEY}
 OPENAI_API_KEY=${OPENAI_API_KEY}
+${GITHUB_TOKEN:+GITHUB_TOKEN=${GITHUB_TOKEN}}
 EOF
 )"
 
