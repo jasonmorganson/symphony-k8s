@@ -55,20 +55,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Codex CLI in the orchestrator runtime, since Symphony launches the
-# agent command from this container.
-RUN npm install -g @openai/codex
-RUN set -eux; \
-    codex_js="/usr/local/lib/node_modules/@openai/codex/bin/codex.js"; \
-    test -f "$codex_js"; \
-    rm -f /usr/local/bin/codex; \
-    printf '%s\n' '#!/bin/sh' "exec node \"$codex_js\" \"\$@\"" > /usr/local/bin/codex; \
-    chmod 0755 /usr/local/bin/codex; \
-    chown root:root /usr/local/bin/codex
-
 ENV PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:${PATH}"
 
-RUN useradd --create-home --shell /bin/bash --uid 10001 symphony
+COPY docker/runtime-common.sh /tmp/runtime-common.sh
+RUN . /tmp/runtime-common.sh && install_codex_cli && setup_symphony_user
 
 WORKDIR /app
 COPY --from=build /tmp/symphony-release /app
@@ -76,7 +66,7 @@ COPY docker/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 RUN if [ -x /app/bin/symphony_elixir ] && [ ! -e /app/bin/symphony ]; then \
       ln -s /app/bin/symphony_elixir /app/bin/symphony; \
     fi
-RUN mkdir -p /home/symphony/.ssh && chown -R symphony:symphony /home/symphony /app
+RUN . /tmp/runtime-common.sh && ensure_symphony_dirs && chown -R symphony:symphony /app
 RUN chmod 0755 /usr/local/bin/orchestrator-entrypoint.sh
 
 USER symphony
