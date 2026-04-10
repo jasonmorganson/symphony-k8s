@@ -47,7 +47,7 @@ export LINEAR_PROJECT_SLUG="your-linear-project-slug"
 export REPO_URL="https://github.com/your-org/your-repo.git"
 ```
 
-Run Skaffold directly:
+Run Skaffold directly for local access:
 
 ```bash
 skaffold dev
@@ -65,7 +65,7 @@ What Skaffold does automatically:
 - applies pod disruption budgets, ingress, and scheduling preferences
 - forwards `symphony-orchestrator` to `http://127.0.0.1:4000` during `skaffold dev`
 
-One-shot prod-style deploy:
+One-shot deploy for a real cluster:
 
 ```bash
 skaffold run -p prod
@@ -91,13 +91,21 @@ Access the orchestrator UI/API from your host:
 http://127.0.0.1:4000
 ```
 
+For local OrbStack access while using `run`, use Skaffold's built-in port forwarding:
+
+```bash
+skaffold run --tail --port-forward
+```
+
+That keeps the deployment running and forwards `symphony-orchestrator` to `http://127.0.0.1:4000`.
+
 For remote clusters, use an ingress controller if one is available. The repo includes a basic `Ingress` that routes to `symphony-orchestrator` on port `4000`. The `symphony-orchestrator-public` `LoadBalancer` service remains available as a fallback on port `80`. In clusters without a provisioned external IP or ingress controller, port-forward the internal `ClusterIP` service:
 
 ```bash
 kubectl -n symphony port-forward svc/symphony-orchestrator 4000:4000
 ```
 
-On OrbStack, the `LoadBalancer` object may show an external IP but still not be reachable from the host. In that environment, `port-forward` is the reliable access path.
+On OrbStack, the `LoadBalancer` object may show an external IP but still not be reachable from the host. In that environment, Skaffold port forwarding in `run` mode is the reliable access path.
 
 ## Scheduling Notes
 
