@@ -58,6 +58,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Codex CLI in the orchestrator runtime, since Symphony launches the
 # agent command from this container.
 RUN npm install -g @openai/codex
+RUN set -eux; \
+    codex_js="/usr/local/lib/node_modules/@openai/codex/bin/codex.js"; \
+    test -f "$codex_js"; \
+    rm -f /usr/local/bin/codex; \
+    printf '%s\n' '#!/bin/sh' "exec node \"$codex_js\" \"\$@\"" > /usr/local/bin/codex; \
+    chmod 0755 /usr/local/bin/codex; \
+    chown root:root /usr/local/bin/codex
+
+ENV PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:${PATH}"
 
 RUN useradd --create-home --shell /bin/bash --uid 10001 symphony
 
