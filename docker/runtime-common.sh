@@ -21,6 +21,6 @@ setup_symphony_user() {
 }
 
 ensure_symphony_dirs() {
-  mkdir -p /home/symphony/.ssh
-  chown -R symphony:symphony /home/symphony
+  mkdir -p /home/symphony/.ssh /srv/symphony/workspaces
+  chown -R symphony:symphony /home/symphony /srv/symphony
 }

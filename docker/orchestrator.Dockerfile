@@ -1,3 +1,4 @@
+ARG RUNTIME_BASE
 FROM elixir:1.19.1 AS build
 
 ENV MIX_ENV=prod
@@ -42,23 +43,7 @@ RUN rel_dir="$(find _build/prod/rel -mindepth 1 -maxdepth 1 -type d | head -n1)"
     && test -n "$rel_dir" \
     && cp -R "$rel_dir" /tmp/symphony-release
 
-FROM debian:bookworm-slim AS runtime
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssh-client \
-    git \
-    curl \
-    bash \
-    bubblewrap \
-    nodejs \
-    npm \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-ENV PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:${PATH}"
-
-COPY docker/runtime-common.sh /tmp/runtime-common.sh
-RUN . /tmp/runtime-common.sh && install_codex_cli && setup_symphony_user
+FROM ${RUNTIME_BASE} AS runtime
 
 WORKDIR /app
 COPY --from=build /tmp/symphony-release /app
@@ -66,7 +51,7 @@ COPY docker/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 RUN if [ -x /app/bin/symphony_elixir ] && [ ! -e /app/bin/symphony ]; then \
       ln -s /app/bin/symphony_elixir /app/bin/symphony; \
     fi
-RUN . /tmp/runtime-common.sh && ensure_symphony_dirs && chown -R symphony:symphony /app
+RUN chown -R symphony:symphony /app
 RUN chmod 0755 /usr/local/bin/orchestrator-entrypoint.sh
 
 USER symphony

@@ -6,12 +6,22 @@ build:
   local:
     push: false
   artifacts:
+    - image: symphony-runtime-base
+      context: .
+      docker:
+        dockerfile: docker/runtime-base.Dockerfile
     - image: symphony-orchestrator
       context: .
+      requires:
+        - image: symphony-runtime-base
+          alias: RUNTIME_BASE
       docker:
         dockerfile: docker/orchestrator.Dockerfile
     - image: symphony-worker
       context: .
+      requires:
+        - image: symphony-runtime-base
+          alias: RUNTIME_BASE
       docker:
         dockerfile: docker/worker.Dockerfile
 manifests:
