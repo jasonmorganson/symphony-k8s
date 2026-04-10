@@ -13,5 +13,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:${PATH}"
 
-COPY docker/runtime-common.sh /tmp/runtime-common.sh
+COPY docker/common/runtime-common.sh /tmp/runtime-common.sh
 RUN . /tmp/runtime-common.sh && install_codex_cli && setup_symphony_user && ensure_symphony_dirs

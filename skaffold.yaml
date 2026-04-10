@@ -9,21 +9,27 @@ build:
     - image: symphony-runtime-base
       context: .
       docker:
-        dockerfile: docker/runtime-base.Dockerfile
+        dockerfile: docker/runtime-base/Dockerfile
+    - image: symphony-release
+      context: .
+      docker:
+        dockerfile: docker/release/Dockerfile
     - image: symphony-orchestrator
       context: .
       requires:
         - image: symphony-runtime-base
           alias: RUNTIME_BASE
+        - image: symphony-release
+          alias: SYMPHONY_RELEASE_IMAGE
       docker:
-        dockerfile: docker/orchestrator.Dockerfile
+        dockerfile: docker/orchestrator/Dockerfile
     - image: symphony-worker
       context: .
       requires:
         - image: symphony-runtime-base
           alias: RUNTIME_BASE
       docker:
-        dockerfile: docker/worker.Dockerfile
+        dockerfile: docker/worker/Dockerfile
 manifests:
   kustomize:
     paths:
