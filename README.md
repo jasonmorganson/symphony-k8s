@@ -62,6 +62,9 @@ What Skaffold does automatically:
 - builds `symphony-runtime-base`, `symphony-release`, `symphony-orchestrator`, and `symphony-worker`
 - renders the Kustomize base under `k8s/base/`
 - creates the workflow ConfigMap and required Secrets from the generated files
+- rolls the orchestrator when the canonical workflow content changes; worker
+  credential changes remain operator-controlled through the StatefulSet's
+  `OnDelete` update strategy
 - deploys the orchestrator, workers, and services into `symphony`
 - applies pod disruption budgets, ingress, and scheduling preferences
 - forwards `symphony-orchestrator` to `http://127.0.0.1:4000` during `skaffold dev`
