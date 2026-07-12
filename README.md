@@ -166,6 +166,10 @@ Production uses two separate node pools:
   tainted `symphony.morganson.me/workload=system:NoSchedule`.
 - `symphony-ha` contains only `s-4vcpu-8gb` workers and autos-scales from zero
   to five nodes. Active worker compute ranges from about $96 to $240/month.
+  Each worker reserves 2 vCPU / 4 GiB and may use the node's full 4 vCPU with a
+  6 GiB memory limit. The remaining memory is left for Kubernetes and system
+  daemons. This prevents Codex plus the full repository gate from being killed
+  at the previous 1.5 GiB limit.
 
 The fixed system tier keeps the dashboard and wake-up controller available
 when no worker nodes exist. DigitalOcean control-plane HA remains disabled and

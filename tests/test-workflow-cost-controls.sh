@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow="$ROOT_DIR/workflow/WORKFLOW.md"
+worker_patch="$ROOT_DIR/k8s/digitalocean/single-node-worker-patch.yaml"
 
 grep -q '^  interval_ms: 15000$' "$workflow"
 grep -q '^  max_concurrent_agents_per_host: 1$' "$workflow"
@@ -40,5 +41,10 @@ if grep -Eq 'model_auto_compact_token_limit=([2-9][0-9]{5}|[1-9][0-9]{6,})' "$wo
   echo "workflow compaction threshold is too high for the cost-control canary" >&2
   exit 1
 fi
+
+grep -A5 'requests:' "$worker_patch" | grep -q 'cpu: "2"'
+grep -A5 'requests:' "$worker_patch" | grep -q 'memory: 4Gi'
+grep -A3 'limits:' "$worker_patch" | grep -q 'cpu: "4"'
+grep -A3 'limits:' "$worker_patch" | grep -q 'memory: 6Gi'
 
 echo "workflow cost-control tests passed"
