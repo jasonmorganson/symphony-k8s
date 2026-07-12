@@ -5,14 +5,69 @@ resources:
   - ../base
 
 patches:
-  - path: private-service-patch.yaml
+  - target:
+      kind: Service
+      name: symphony-orchestrator-public
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: symphony-orchestrator-public
+  - target:
+      kind: Ingress
+      name: symphony-orchestrator
+    patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: symphony-orchestrator
+  - target:
+      kind: PersistentVolumeClaim
+      name: symphony-orchestrator-workspaces
+    patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: do-block-storage
+  - target:
+      kind: PodDisruptionBudget
+      name: symphony-orchestrator
+    patch: |-
+      - op: remove
+        path: /spec/minAvailable
+      - op: add
+        path: /spec/maxUnavailable
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: symphony-worker
+    patch: |-
+      - op: remove
+        path: /spec/minAvailable
+      - op: add
+        path: /spec/maxUnavailable
+        value: 1
+  - target:
+      kind: Deployment
+      name: symphony-orchestrator
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+  - target:
+      kind: StatefulSet
+      name: symphony-worker
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
   - path: single-node-worker-patch.yaml
 
 images:
   - name: nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator
-    newName: symphony-orchestrator
-    newTag: do
+    newName: ghcr.io/jasonmorganson/symphony-k8s-orchestrator
+    newTag: "20260712"
   - name: nscr.io/k7qcltdhpncg0/symphony-k8s/worker
-    newName: symphony-worker
-    newTag: do
-
+    newName: ghcr.io/jasonmorganson/symphony-k8s-worker
+    newTag: "20260712"
