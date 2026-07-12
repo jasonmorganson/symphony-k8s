@@ -208,6 +208,72 @@ Then open <http://127.0.0.1:4000>. DOKS restarts failed pods automatically, and
 the managed block volumes survive pod and worker-node replacement. Keep the
 dashboard private until an authenticated ingress is added.
 
+### Protected dashboard access
+
+The public dashboard is published at <https://symphony.morganson.me> through a
+remotely managed Cloudflare Tunnel. The Kubernetes service remains a private
+`ClusterIP`: no DigitalOcean LoadBalancer, Ingress, NodePort, or inbound
+firewall rule is used. Cloudflare Access protects every path with GitHub login
+and allows only `jasonmorganson@gmail.com` for a 24-hour session.
+
+The tunnel token is stored only in the live `cloudflare-tunnel-token` Secret.
+Create or rotate it without putting plaintext in a command argument or file:
+
+```bash
+read -rs CLOUDFLARE_TUNNEL_TOKEN
+printf '\n'
+printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" | \
+  KUBECONFIG="$HOME/.kube/symphony-doks.yaml" \
+  kubectl -n symphony create secret generic cloudflare-tunnel-token \
+    --from-file=token=/dev/stdin \
+    --dry-run=client -o yaml | \
+  KUBECONFIG="$HOME/.kube/symphony-doks.yaml" \
+  kubectl apply --server-side -f -
+unset CLOUDFLARE_TUNNEL_TOKEN
+KUBECONFIG="$HOME/.kube/symphony-doks.yaml" \
+  kubectl -n symphony rollout restart deployment/cloudflared
+```
+
+Deleting or disabling the public hostname route or Tunnel stops public
+dashboard access but does not stop Symphony. For immediate incident
+containment, scale `deployment/cloudflared` to zero or install an explicit
+deny-all Access policy. Never disable or delete the Access application while the
+public hostname route remains active, because that can remove the authentication
+gate. The authenticated local break-glass path remains available:
+
+```bash
+KUBECONFIG="$HOME/.kube/symphony-doks.yaml" \
+  kubectl -n symphony port-forward svc/symphony-orchestrator 4000:4000
+```
+
+Useful tunnel checks:
+
+```bash
+KUBECONFIG="$HOME/.kube/symphony-doks.yaml" \
+  kubectl -n symphony rollout status deployment/cloudflared
+KUBECONFIG="$HOME/.kube/symphony-doks.yaml" \
+  kubectl -n symphony logs -l app=cloudflared --tail=100
+curl -sS -o /dev/null -D - https://symphony.morganson.me/
+KUBECONFIG="$HOME/.kube/symphony-doks.yaml" \
+  kubectl -n symphony get svc,ingress
+```
+
+An unauthenticated request must redirect to Cloudflare Access, the service list
+must contain no LoadBalancer or NodePort, and the ingress list must be empty.
+Also verify in Cloudflare that the application covers the whole hostname, uses
+only GitHub instant authentication, has a 24-hour session, contains one Allow
+rule for `jasonmorganson@gmail.com`, and contains no Everyone or Bypass policy.
+Test live dashboard updates from an authenticated browser before considering a
+tunnel change complete.
+
+The two connector replicas protect against a single `cloudflared` process
+failure. They run on the same initial DOKS node and therefore do not provide
+node-level availability; Kubernetes recreates them after node replacement.
+
+Never commit the tunnel token. Anyone holding it can run a connector for this
+tunnel; rotate it immediately if it appears in logs, manifests, CI output, or
+shell history.
+
 ## Namespace Kubernetes
 
 The live Namespace deployment is a separate Kubernetes compute instance, not
