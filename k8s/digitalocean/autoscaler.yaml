@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: symphony-autoscaler
+  namespace: symphony
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: symphony-autoscaler
+  namespace: symphony
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets/scale"]
+    resourceNames: ["symphony-worker"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: symphony-autoscaler
+  namespace: symphony
+subjects:
+  - kind: ServiceAccount
+    name: symphony-autoscaler
+    namespace: symphony
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: symphony-autoscaler
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: symphony-autoscaler
+  namespace: symphony
+  labels:
+    app: symphony-autoscaler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: symphony-autoscaler
+  template:
+    metadata:
+      labels:
+        app: symphony-autoscaler
+    spec:
+      serviceAccountName: symphony-autoscaler
+      automountServiceAccountToken: true
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: autoscaler
+          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712
+          imagePullPolicy: Always
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LINEAR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: symphony-secrets
+                  key: LINEAR_API_KEY
+            - name: LINEAR_PROJECT_SLUG
+              value: arrusted-development-71c3d9986f6d
+            - name: MIN_WORKERS
+              value: "2"
+            - name: MAX_WORKERS
+              value: "5"
+            - name: AGENTS_PER_WORKER
+              value: "3"
+            - name: POLL_INTERVAL_SECONDS
+              value: "15"
+            - name: SCALE_DOWN_COOLDOWN_SECONDS
+              value: "1200"
+          ports:
+            - name: metrics
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 15
+            failureThreshold: 4
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: symphony-autoscaler
+  namespace: symphony
+spec:
+  selector:
+    app: symphony-autoscaler
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics

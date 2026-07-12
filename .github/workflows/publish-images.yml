@@ -6,6 +6,7 @@ on:
     branches: [master]
     paths:
       - docker/**
+      - autoscaler/**
       - .github/workflows/publish-images.yml
 
 permissions:
@@ -22,6 +23,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test autoscaler
+        run: PYTHONPATH=autoscaler python3 -m unittest -v autoscaler/test_scaler.py
       - name: Build images
         run: |
           docker build -t symphony-runtime-base:do -f docker/runtime-base/Dockerfile .
@@ -35,7 +38,11 @@ jobs:
             --build-arg RUNTIME_BASE=symphony-runtime-base:do \
             -t ghcr.io/jasonmorganson/symphony-k8s-worker:20260712 \
             -f docker/worker/Dockerfile .
+          docker build \
+            -t ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712 \
+            -f docker/autoscaler/Dockerfile .
       - name: Push images
         run: |
           docker push ghcr.io/jasonmorganson/symphony-k8s-orchestrator:20260712
           docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712
+          docker push ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712

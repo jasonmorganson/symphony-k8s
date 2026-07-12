@@ -156,10 +156,42 @@ It deliberately stays separate from the standalone `symphony-docker` Droplet:
 - orchestrator and worker workspaces use managed `do-block-storage` volumes
 - runtime images are pulled from GHCR, so node replacement is safe
 
-Create a non-HA DOKS cluster in `nyc3` with one `s-2vcpu-4gb` node. High
-availability is unnecessary for this initial single-node deployment and adds a
-separate control-plane charge. Kubernetes and DigitalOcean Block Storage keep
-the service and workspace volumes independent of any individual worker VM.
+The production DOKS pool uses `s-4vcpu-8gb` workers with node-pool autoscaling
+from two to five nodes. The two-node floor preserves workload failover; the
+five-node ceiling caps worker compute near $240/month. DigitalOcean control
+plane HA remains disabled and would add a separate monthly charge.
+
+### Demand-based autoscaling
+
+The `symphony-autoscaler` deployment polls Linear and Symphony every 15
+seconds. It counts runnable issues in `Todo`, `In Progress`, `Rework`, and
+`Merging`, then requests one worker for each three issues, bounded to two through
+five workers. Scale-up is immediate. Scale-down requires no running or retrying
+sessions and 20 continuous minutes of reduced demand.
+
+Each worker has strict hostname spreading, so a pending worker makes the DOKS
+Cluster Autoscaler add a node. Configure the `symphony-ha` pool with minimum 2
+and maximum 5 nodes. StatefulSet PVCs are retained after scale-down so work can
+resume safely; those block-storage volumes continue to incur storage charges.
+
+Pause automatic worker changes during an incident:
+
+```bash
+kubectl -n symphony scale deployment/symphony-autoscaler --replicas=0
+```
+
+Apply a temporary manual worker count while the scaler is paused:
+
+```bash
+kubectl -n symphony scale statefulset/symphony-worker --replicas=2
+```
+
+Inspect health and metrics without exposing secrets:
+
+```bash
+kubectl -n symphony port-forward svc/symphony-autoscaler 8080:8080
+curl http://127.0.0.1:8080/metrics
+```
 
 Build and publish the amd64 runtime images:
 

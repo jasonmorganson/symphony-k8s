@@ -24,6 +24,8 @@ worker:
     - symphony-worker-0.symphony-worker.symphony.svc.cluster.local
     - symphony-worker-1.symphony-worker.symphony.svc.cluster.local
     - symphony-worker-2.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-3.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-4.symphony-worker.symphony.svc.cluster.local
   max_concurrent_agents_per_host: 3
 hooks:
   after_create: |
@@ -55,7 +57,7 @@ hooks:
       echo "wt not found; skipping Worktrunk hook teardown." >&2
     fi
 agent:
-  max_concurrent_agents: 10
+  max_concurrent_agents: 15
   max_turns: 20
 codex:
   command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=xhigh --model gpt-5.3-codex app-server
