@@ -13,6 +13,7 @@ grep -q '^  max_turns: 20$' "$workflow"
 grep -q '^  max_concurrent_agents_by_state:$' "$workflow"
 grep -q '^    Merging: 1$' "$workflow"
 grep -q 'model_reasoning_effort=medium' "$workflow"
+grep -q 'agents.max_threads=3' "$workflow"
 grep -q 'Keep at most 12 concise `Notes` bullets' "$workflow"
 grep -q 'Deduplicate overlapping findings by root cause' "$workflow"
 grep -q 'must not independently rerun the full repository gate' "$workflow"
@@ -40,6 +41,11 @@ fi
 
 if grep -q 'model_auto_compact_token_limit' "$workflow"; then
   echo "workflow reintroduced the compaction override that increased live token slope" >&2
+  exit 1
+fi
+
+if grep -Eq 'agents.max_threads=([4-9]|[1-9][0-9]+)' "$workflow"; then
+  echo "workflow allows excessive per-issue subagent fan-out" >&2
   exit 1
 fi
 

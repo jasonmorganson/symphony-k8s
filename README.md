@@ -254,6 +254,9 @@ Later feedback-driven code changes invalidate and rerun that gate.
 Required review panels inspect the diff and existing evidence; they use targeted
 reproductions for suspected defects instead of each launching the same full
 matrix. The primary agent owns the authoritative final gate.
+Codex is capped at three threads per issue: one primary plus up to two independent
+reviewers, rather than the six-thread default. With five Symphony workers this
+bounds worst-case model fan-out at 15 threads instead of 30.
 A 120,000-token Codex auto-compaction override was tested and removed: during
 the short live A-142 debugging segment it showed no benefit and coincided with
 a higher observed input-token slope while adding compaction work. The workflow
