@@ -5,6 +5,17 @@ metadata:
   namespace: symphony
 spec:
   replicas: 1
+  template:
+    spec:
+      containers:
+        - name: worker
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1536Mi
   volumeClaimTemplates:
     - metadata:
         name: workspaces

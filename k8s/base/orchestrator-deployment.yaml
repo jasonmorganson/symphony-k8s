@@ -94,6 +94,12 @@ spec:
               port: http
             periodSeconds: 30
             failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
@@ -122,6 +128,13 @@ spec:
           args:
             - TCP-LISTEN:4000,fork,reuseaddr
             - TCP:127.0.0.1:4001
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
