@@ -11,11 +11,11 @@ spec:
         - name: worker
           resources:
             requests:
-              cpu: 100m
-              memory: 512Mi
+              cpu: "2"
+              memory: 4Gi
             limits:
-              cpu: "1"
-              memory: 1536Mi
+              cpu: "4"
+              memory: 6Gi
   volumeClaimTemplates:
     - metadata:
         name: workspaces
