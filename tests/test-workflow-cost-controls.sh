@@ -10,15 +10,15 @@ grep -q '^  max_concurrent_agents: 5$' "$workflow"
 grep -q '^  max_turns: 20$' "$workflow"
 grep -q '^  max_concurrent_agents_by_state:$' "$workflow"
 grep -q '^    Merging: 1$' "$workflow"
-grep -q 'model_reasoning_effort=high' "$workflow"
+grep -q 'model_reasoning_effort=medium' "$workflow"
 
 if grep -A12 '^  active_states:' "$workflow" | grep -q 'Human Review'; then
   echo "Human Review must not dispatch unattended Codex sessions" >&2
   exit 1
 fi
 
-if grep -q 'model_reasoning_effort=xhigh' "$workflow"; then
-  echo "xhigh reasoning reintroduced into the default workflow" >&2
+if grep -Eq 'model_reasoning_effort=(high|xhigh)' "$workflow"; then
+  echo "high-cost reasoning reintroduced into the default workflow" >&2
   exit 1
 fi
 
