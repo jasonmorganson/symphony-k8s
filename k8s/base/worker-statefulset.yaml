@@ -102,6 +102,7 @@ spec:
                 - -c
                 - runuser -u symphony -- env HOME=/home/symphony codex login status 2>&1 | grep -Fq 'Logged in using ChatGPT'
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             tcpSocket:
               port: ssh

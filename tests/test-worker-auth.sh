@@ -45,5 +45,6 @@ fi
 grep -q 'secretName: codex-chatgpt-auth' "${worker_manifests[0]}"
 grep -q 'mountPath: /home/symphony/.codex' "${worker_manifests[0]}"
 grep -q 'subPath: codex-home' "${worker_manifests[0]}"
+grep -A8 'readinessProbe:' "${worker_manifests[0]}" | grep -q 'timeoutSeconds: 5'
 
 echo "worker authentication tests passed"
