@@ -4,7 +4,7 @@ from scaler import Scaler, desired_workers
 
 class DesiredWorkersTest(unittest.TestCase):
     def test_capacity_bands(self):
-        cases = {0: 0, 1: 2, 6: 2, 7: 3, 9: 3, 10: 4, 12: 4, 13: 5, 15: 5, 99: 5}
+        cases = {0: 0, 1: 2, 2: 2, 3: 3, 4: 4, 5: 5, 99: 5}
         for issues, expected in cases.items():
             with self.subTest(issues=issues):
                 self.assertEqual(desired_workers(issues), expected)
@@ -19,7 +19,7 @@ class FakeScaler(Scaler):
         self.now = lambda: self.clock
         self.minimum = 2
         self.maximum = 5
-        self.agents_per_worker = 3
+        self.agents_per_worker = 1
         self.cooldown_seconds = 1200
         self.low_demand_since = None
         self.issues = 0
@@ -79,7 +79,7 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(scaler.changes, [])
         scaler.clock = 1200
         scaler.run_once()
-        self.assertEqual(scaler.changes, [2])
+        self.assertEqual(scaler.changes, [3])
 
     def test_zero_demand_scales_to_zero_after_idle_cooldown(self):
         scaler = FakeScaler()

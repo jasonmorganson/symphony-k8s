@@ -13,7 +13,7 @@ LINEAR_URL = "https://api.linear.app/graphql"
 RUNNABLE_STATES = ("Todo", "In Progress", "Rework", "Merging")
 
 
-def desired_workers(issue_count, agents_per_worker=3, minimum=2, maximum=5):
+def desired_workers(issue_count, agents_per_worker=1, minimum=2, maximum=5):
     if issue_count == 0:
         return 0
     return max(minimum, min(maximum, math.ceil(issue_count / agents_per_worker)))
@@ -29,7 +29,7 @@ class Scaler:
         self.symphony_url = os.getenv("SYMPHONY_STATE_URL", "http://symphony-orchestrator:4000/api/v1/state")
         self.minimum = int(os.getenv("MIN_WORKERS", "2"))
         self.maximum = int(os.getenv("MAX_WORKERS", "5"))
-        self.agents_per_worker = int(os.getenv("AGENTS_PER_WORKER", "3"))
+        self.agents_per_worker = int(os.getenv("AGENTS_PER_WORKER", "1"))
         self.cooldown_seconds = int(os.getenv("SCALE_DOWN_COOLDOWN_SECONDS", "1200"))
         self.kube_host = os.environ["KUBERNETES_SERVICE_HOST"]
         self.kube_port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS", "443")

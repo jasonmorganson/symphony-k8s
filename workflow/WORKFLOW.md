@@ -6,7 +6,6 @@ tracker:
   active_states:
     - Todo
     - In Progress
-    - Human Review
     - Merging
     - Rework
   terminal_states:
@@ -16,7 +15,7 @@ tracker:
     - Duplicate
     - Done
 polling:
-  interval_ms: 5000
+  interval_ms: 15000
 workspace:
   root: /srv/symphony/workspaces
 worker:
@@ -26,7 +25,7 @@ worker:
     - symphony-worker-2.symphony-worker.symphony.svc.cluster.local
     - symphony-worker-3.symphony-worker.symphony.svc.cluster.local
     - symphony-worker-4.symphony-worker.symphony.svc.cluster.local
-  max_concurrent_agents_per_host: 3
+  max_concurrent_agents_per_host: 1
 hooks:
   after_create: |
     if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -57,10 +56,12 @@ hooks:
       echo "wt not found; skipping Worktrunk hook teardown." >&2
     fi
 agent:
-  max_concurrent_agents: 15
+  max_concurrent_agents: 5
   max_turns: 20
+  max_concurrent_agents_by_state:
+    Merging: 1
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=xhigh --model gpt-5.3-codex app-server
+  command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=high --model gpt-5.3-codex app-server
   approval_policy: never
   thread_sandbox: danger-full-access
   turn_sandbox_policy:
@@ -160,7 +161,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
    - `Todo` -> immediately move to `In Progress`, then ensure bootstrap workpad comment exists (create if missing), then start execution flow.
      - If PR is already attached, start by reviewing all open PR comments and deciding required changes vs explicit pushback responses.
    - `In Progress` -> continue execution flow from current scratchpad comment.
-   - `Human Review` -> wait and poll for decision/review updates.
+   - `Human Review` -> stop the run; Symphony deliberately leaves this state inactive until a human moves it to `Rework` or `Merging`.
    - `Merging` -> on entry, open and follow `.codex/skills/land/SKILL.md`; do not call `gh pr merge` directly.
    - `Rework` -> run rework flow.
    - `Done` -> do nothing and shut down.
