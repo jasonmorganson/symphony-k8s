@@ -9,8 +9,17 @@ trim_secret() {
   export "$name=$value"
 }
 
+verify_codex_chatgpt_auth() {
+  local login_status
+  login_status="$(runuser -u symphony -- env HOME=/home/symphony codex login status 2>&1 || true)"
+  if [[ "$login_status" != *"Logged in using ChatGPT"* ]]; then
+    echo "Codex ChatGPT authentication is required; API-key fallback is disabled" >&2
+    return 1
+  fi
+}
+
+main() {
 trim_secret LINEAR_API_KEY
-trim_secret OPENAI_API_KEY
 
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   trim_secret GITHUB_TOKEN
@@ -21,10 +30,7 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   chmod 0600 /home/symphony/.netrc
 fi
 
-if ! runuser -u symphony -- env HOME=/home/symphony codex login status >/dev/null 2>&1; then
-  printf '%s\n' "$OPENAI_API_KEY" | \
-    runuser -u symphony -- env HOME=/home/symphony codex login --with-api-key >/dev/null
-fi
+verify_codex_chatgpt_auth
 
 mkdir -p /srv/symphony/workspaces /home/symphony/.ssh /run/sshd
 chown -R symphony:symphony /srv/symphony
@@ -40,3 +46,8 @@ fi
 chmod 700 /home/symphony/.ssh
 
 exec /usr/sbin/sshd -D -e
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
