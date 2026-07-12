@@ -3,7 +3,14 @@ FROM ${RUNTIME_BASE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server \
+    build-essential \
+    python3 \
+    pkg-config \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
+
+ARG MISE_VERSION=2026.7.5
+RUN . /tmp/runtime-common.sh && install_mise
 
 RUN mkdir -p /srv/symphony/workspaces /etc/ssh/keys /run/sshd \
     && chown -R symphony:symphony /srv/symphony /etc/ssh/keys
