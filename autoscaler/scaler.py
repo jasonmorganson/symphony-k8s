@@ -8,11 +8,23 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LINEAR_URL = "https://api.linear.app/graphql"
 RUNNABLE_STATES = ("Todo", "In Progress", "Rework", "Merging")
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens")
+
+
+def stable_session_id(session_id):
+    if isinstance(session_id, str) and len(session_id) == 73 and session_id[36] == "-":
+        try:
+            uuid.UUID(session_id[:36])
+            uuid.UUID(session_id[37:])
+            return session_id[:36]
+        except ValueError:
+            pass
+    return session_id
 
 
 class UsageLedger:
@@ -36,7 +48,7 @@ class UsageLedger:
             if not all(self._valid_persisted_entry(key, value)
                        for key, value in payload["sessions"].items()):
                 raise ValueError("invalid usage ledger sessions")
-            self.sessions = payload["sessions"]
+            self.sessions = self._consolidate_sessions(payload["sessions"])
         except FileNotFoundError:
             return
         except (OSError, ValueError, TypeError, AttributeError):
@@ -62,6 +74,29 @@ class UsageLedger:
         return entry.get("ended_at") is None or isinstance(entry["ended_at"], int)
 
     @staticmethod
+    def _consolidate_sessions(sessions):
+        consolidated = {}
+        for source in sessions.values():
+            session_id = stable_session_id(source["session_id"])
+            entry = dict(source, session_id=session_id)
+            existing = consolidated.get(session_id)
+            if existing is None:
+                consolidated[session_id] = entry
+                continue
+            if existing["issue_identifier"] != entry["issue_identifier"]:
+                raise ValueError("session belongs to multiple issues")
+            for field in (*TOKEN_FIELDS, "turn_count", "last_observed_at"):
+                existing[field] = max(existing[field], entry[field])
+            existing["first_observed_at"] = min(existing["first_observed_at"], entry["first_observed_at"])
+            if existing.get("started_at") is None:
+                existing["started_at"] = entry.get("started_at")
+            existing["ended_at"] = (None if existing.get("ended_at") is None or entry.get("ended_at") is None
+                                     else max(existing["ended_at"], entry["ended_at"]))
+            existing["total_tokens"] = max(existing["total_tokens"],
+                                            existing["input_tokens"] + existing["output_tokens"])
+        return consolidated
+
+    @staticmethod
     def _nonnegative_integer(value):
         try:
             return max(0, int(value))
@@ -79,7 +114,7 @@ class UsageLedger:
             for running in state.get("running", []):
                 if not isinstance(running, dict):
                     continue
-                session_id = running.get("session_id")
+                session_id = stable_session_id(running.get("session_id"))
                 issue_identifier = running.get("issue_identifier")
                 if not isinstance(session_id, str) or not session_id or \
                         not isinstance(issue_identifier, str) or not issue_identifier:

@@ -2,10 +2,55 @@ import unittest
 import os
 import tempfile
 from unittest import mock
-from scaler import Scaler, UsageLedger, desired_workers
+from scaler import Scaler, UsageLedger, desired_workers, stable_session_id
 
 
 class UsageLedgerTest(unittest.TestCase):
+    def test_composite_turn_ids_share_one_stable_session(self):
+        thread = "019f570a-95f5-7060-b695-f1469907d96d"
+        first = f"{thread}-019f5720-470c-7da2-b5b9-cdb8df0287a3"
+        second = f"{thread}-019f5723-7a6d-75b1-b842-296d8407dd3c"
+        self.assertEqual(stable_session_id(first), thread)
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = UsageLedger(os.path.join(directory, "usage.json"))
+            ledger.observe({"running": [{
+                "issue_identifier": "A-142", "session_id": first, "turn_count": 13,
+                "tokens": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            }]})
+            ledger.observe({"running": [{
+                "issue_identifier": "A-142", "session_id": second, "turn_count": 15,
+                "tokens": {"input_tokens": 120, "output_tokens": 12, "total_tokens": 132},
+            }]})
+            snapshot = ledger.snapshot()
+            self.assertEqual(list(snapshot["sessions"]), [thread])
+            self.assertEqual(snapshot["issues"]["A-142"]["input_tokens"], 120)
+
+    def test_reload_migrates_composite_session_records_without_summing(self):
+        thread = "019f570a-95f5-7060-b695-f1469907d96d"
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "usage.json")
+            sessions = {}
+            for suffix, tokens, ended in (("019f5720-470c-7da2-b5b9-cdb8df0287a3", 100, 3),
+                                           ("019f5723-7a6d-75b1-b842-296d8407dd3c", 120, None)):
+                composite = f"{thread}-{suffix}"
+                sessions[composite] = {
+                    "session_id": composite, "issue_identifier": "A-142", "started_at": None,
+                    "first_observed_at": 1, "last_observed_at": 2, "ended_at": ended,
+                    "turn_count": 2, "input_tokens": tokens, "output_tokens": 10,
+                    "total_tokens": tokens + 10,
+                }
+            with open(path, "w", encoding="utf-8") as target:
+                import json
+                json.dump({"version": 1, "sessions": sessions}, target)
+            ledger = UsageLedger(path)
+            self.assertEqual(list(ledger.sessions), [thread])
+            self.assertEqual(ledger.sessions[thread]["input_tokens"], 120)
+            self.assertEqual(ledger.sessions[thread]["output_tokens"], 10)
+            self.assertEqual(ledger.sessions[thread]["total_tokens"], 130)
+            self.assertEqual(ledger.sessions[thread]["turn_count"], 2)
+            self.assertEqual(ledger.sessions[thread]["first_observed_at"], 1)
+            self.assertEqual(ledger.sessions[thread]["last_observed_at"], 2)
+            self.assertIsNone(ledger.sessions[thread]["ended_at"])
     def test_persists_session_high_water_marks_and_issue_totals(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "usage.json")
