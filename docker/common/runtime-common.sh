@@ -2,7 +2,7 @@
 set -eu
 
 install_codex_cli() {
-  npm install -g @openai/codex
+  npm install -g @openai/codex@0.144.1
 
   codex_js="/usr/local/lib/node_modules/@openai/codex/bin/codex.js"
   test -f "$codex_js"

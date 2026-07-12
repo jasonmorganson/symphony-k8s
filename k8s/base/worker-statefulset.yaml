@@ -84,6 +84,15 @@ spec:
           ports:
             - name: ssh
               containerPort: 22
+          readinessProbe:
+            tcpSocket:
+              port: ssh
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: ssh
+            periodSeconds: 30
+            failureThreshold: 3
           envFrom:
             - secretRef:
                 name: symphony-secrets

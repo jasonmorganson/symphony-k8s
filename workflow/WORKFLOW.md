@@ -19,6 +19,12 @@ polling:
   interval_ms: 5000
 workspace:
   root: /srv/symphony/workspaces
+worker:
+  ssh_hosts:
+    - symphony-worker-0.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-1.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-2.symphony-worker.symphony.svc.cluster.local
+  max_concurrent_agents_per_host: 3
 hooks:
   after_create: |
     if [ -n "${GITHUB_TOKEN:-}" ]; then

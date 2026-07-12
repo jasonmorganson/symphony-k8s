@@ -1,4 +1,4 @@
-FROM elixir:1.19.1
+FROM elixir:1.19.5-otp-28
 
 ENV MIX_ENV=prod
 WORKDIR /app
@@ -14,8 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mix local.hex --force && mix local.rebar --force
 
 ARG SYMPHONY_REPO=https://github.com/jasonmorganson/symphony.git
+ARG SYMPHONY_COMMIT=a164593aacb3db4d6808adc5a87173d906726406
 RUN if [ ! -f mix.exs ]; then \
-      git clone --depth=1 "${SYMPHONY_REPO}" /tmp/symphony-src && \
+      git clone --filter=blob:none --no-checkout "${SYMPHONY_REPO}" /tmp/symphony-src && \
+      git -C /tmp/symphony-src fetch --depth=1 origin "${SYMPHONY_COMMIT}" && \
+      git -C /tmp/symphony-src checkout --detach FETCH_HEAD && \
       cp -R /tmp/symphony-src/. /app/ ; \
     fi
 

@@ -7,6 +7,8 @@ metadata:
     app: symphony-orchestrator
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: symphony-orchestrator
@@ -70,11 +72,28 @@ spec:
             - "SymphonyElixir.CLI.main(System.argv())"
             - "--i-understand-that-this-will-be-running-without-the-usual-guardrails"
             - "--port"
-            - "4000"
+            - "4001"
             - "./WORKFLOW.md"
           ports:
             - name: http
               containerPort: 4000
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
@@ -98,6 +117,16 @@ spec:
             - name: orchestrator-ssh
               mountPath: /home/symphony/.ssh
               readOnly: true
+        - name: dashboard-proxy
+          image: alpine/socat:1.8.0.3
+          args:
+            - TCP-LISTEN:4000,fork,reuseaddr
+            - TCP:127.0.0.1:4001
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
       volumes:
         - name: workflow
           configMap:

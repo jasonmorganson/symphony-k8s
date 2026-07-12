@@ -40,3 +40,11 @@ secretGenerator:
 
 generatorOptions:
   disableNameSuffixHash: true
+
+images:
+  - name: symphony-orchestrator
+    newName: nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator
+    newTag: "20260711-3"
+  - name: symphony-worker
+    newName: nscr.io/k7qcltdhpncg0/symphony-k8s/worker
+    newTag: "20260711-3"
