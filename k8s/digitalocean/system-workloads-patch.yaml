@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: symphony-orchestrator
+  namespace: symphony
+spec:
+  template:
+    spec:
+      nodeSelector:
+        doks.digitalocean.com/node-pool: symphony-system
+      tolerations:
+        - key: symphony.morganson.me/workload
+          operator: Equal
+          value: system
+          effect: NoSchedule
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: symphony-autoscaler
+  namespace: symphony
+spec:
+  template:
+    spec:
+      nodeSelector:
+        doks.digitalocean.com/node-pool: symphony-system
+      tolerations:
+        - key: symphony.morganson.me/workload
+          operator: Equal
+          value: system
+          effect: NoSchedule
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: symphony
+spec:
+  template:
+    spec:
+      nodeSelector:
+        doks.digitalocean.com/node-pool: symphony-system
+      tolerations:
+        - key: symphony.morganson.me/workload
+          operator: Equal
+          value: system
+          effect: NoSchedule

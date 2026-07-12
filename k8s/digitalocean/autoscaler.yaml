@@ -56,7 +56,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: autoscaler
-          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712
+          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712-zero
           imagePullPolicy: Always
           env:
             - name: POD_NAMESPACE

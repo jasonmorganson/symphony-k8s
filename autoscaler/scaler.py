@@ -14,6 +14,8 @@ RUNNABLE_STATES = ("Todo", "In Progress", "Rework", "Merging")
 
 
 def desired_workers(issue_count, agents_per_worker=3, minimum=2, maximum=5):
+    if issue_count == 0:
+        return 0
     return max(minimum, min(maximum, math.ceil(issue_count / agents_per_worker)))
 
 
@@ -140,6 +142,8 @@ class MetricsHandler(BaseHTTPRequestHandler):
             f'symphony_autoscaler_desired_workers {metrics["desired"]}',
             f'symphony_autoscaler_current_workers {metrics["current"]}',
             f'symphony_autoscaler_runnable_issues {metrics["queue"]}',
+            f'symphony_autoscaler_idle {int(metrics["queue"] == 0)}',
+            f'symphony_autoscaler_active_minimum_workers {self.scaler.minimum}',
             f'symphony_autoscaler_scale_down_cooldown_seconds {metrics["cooldown"]}',
             f'symphony_autoscaler_errors_total {metrics["errors"]}',
             f'symphony_autoscaler_last_error{{type="{metrics["last_error"]}"}} 1',
