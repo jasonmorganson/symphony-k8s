@@ -245,13 +245,22 @@ context resubmission and full validation for each overlapping review comment.
 Later feedback-driven code changes invalidate and rerun that gate.
 
 Current-session per-issue and aggregate measurements are available from the
-private state API. Completed-issue history is not retained by this endpoint:
+private state API. The autoscaler snapshots each observed Codex session to its
+own persistent volume, retaining high-water token and turn counts across pod,
+node, and orchestrator restarts:
 
 ```bash
 kubectl -n symphony port-forward svc/symphony-orchestrator 4000:4000
 curl -fsS http://127.0.0.1:4000/api/v1/state | jq \
   '{running, retrying, codex_totals}'
+kubectl -n symphony port-forward svc/symphony-autoscaler 8080:8080
+curl -fsS http://127.0.0.1:8080/usage | jq '{issues, sessions}'
 ```
+
+The ledger contains issue identifiers, Codex session IDs, timestamps, token
+high-water marks, and turn counts only. It does not store prompts, responses, or
+credentials. A session is marked ended when it disappears from a successful
+orchestrator observation; totals remain available for before/after comparisons.
 
 Pause automatic worker changes during an incident:
 

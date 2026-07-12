@@ -1,5 +1,132 @@
 import unittest
-from scaler import Scaler, desired_workers
+import os
+import tempfile
+from unittest import mock
+from scaler import Scaler, UsageLedger, desired_workers
+
+
+class UsageLedgerTest(unittest.TestCase):
+    def test_persists_session_high_water_marks_and_issue_totals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "usage.json")
+            clock = [100]
+            ledger = UsageLedger(path, now=lambda: clock[0])
+            ledger.observe({"running": [{
+                "issue_identifier": "A-142", "session_id": "thread-1",
+                "started_at": "2026-07-12T00:00:00Z", "turn_count": 2,
+                "tokens": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            }]})
+            clock[0] = 110
+            ledger.observe({"running": [{
+                "issue_identifier": "A-142", "session_id": "thread-1",
+                "turn_count": 3,
+                "tokens": {"input_tokens": 90, "output_tokens": 12, "total_tokens": 102},
+            }]})
+            restored = UsageLedger(path, now=lambda: 120)
+            snapshot = restored.snapshot()
+            self.assertEqual(snapshot["sessions"]["thread-1"]["input_tokens"], 100)
+            self.assertEqual(snapshot["sessions"]["thread-1"]["output_tokens"], 12)
+            self.assertEqual(snapshot["sessions"]["thread-1"]["turn_count"], 3)
+            self.assertEqual(snapshot["issues"]["A-142"]["sessions"], 1)
+            self.assertEqual(snapshot["issues"]["A-142"]["total_tokens"], 112)
+
+    def test_records_end_and_multiple_sessions_per_issue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "usage.json")
+            clock = [100]
+            ledger = UsageLedger(path, now=lambda: clock[0])
+            ledger.observe({"running": [{
+                "issue_identifier": "A-1", "session_id": "one", "turn_count": 1,
+                "tokens": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+            }]})
+            clock[0] = 110
+            ledger.observe({"running": []})
+            clock[0] = 120
+            ledger.observe({"running": [{
+                "issue_identifier": "A-1", "session_id": "two", "turn_count": 1,
+                "tokens": {"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
+            }]})
+            snapshot = ledger.snapshot()
+            self.assertEqual(snapshot["sessions"]["one"]["ended_at"], 110)
+            self.assertIsNone(snapshot["sessions"]["two"]["ended_at"])
+            self.assertEqual(snapshot["issues"]["A-1"]["sessions"], 2)
+            self.assertEqual(snapshot["issues"]["A-1"]["input_tokens"], 30)
+
+    def test_corrupt_file_is_quarantined_before_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "usage.json")
+            with open(path, "w", encoding="utf-8") as target:
+                target.write("not-json")
+            ledger = UsageLedger(path)
+            self.assertEqual(ledger.sessions, {})
+            self.assertEqual(ledger.load_errors, 1)
+            self.assertFalse(os.path.exists(path))
+            with open(f"{path}.corrupt.{int(ledger.now())}", encoding="utf-8") as source:
+                self.assertEqual(source.read(), "not-json")
+
+    def test_wrong_json_schema_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "usage.json")
+            with open(path, "w", encoding="utf-8") as target:
+                target.write('{"sessions":[]}')
+            ledger = UsageLedger(path, now=lambda: 42)
+            self.assertEqual(ledger.load_errors, 1)
+            self.assertTrue(os.path.exists(f"{path}.corrupt.42"))
+
+    def test_incomplete_session_schema_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "usage.json")
+            with open(path, "w", encoding="utf-8") as target:
+                target.write('{"sessions":{"thread-1":{}}}')
+            ledger = UsageLedger(path, now=lambda: 43)
+            self.assertEqual(ledger.load_errors, 1)
+            self.assertTrue(os.path.exists(f"{path}.corrupt.43"))
+
+    def test_quarantine_failure_prevents_destructive_recovery_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "usage.json")
+            with open(path, "w", encoding="utf-8") as target:
+                target.write("not-json")
+            with mock.patch("scaler.os.replace", side_effect=OSError("readonly")):
+                ledger = UsageLedger(path)
+            self.assertTrue(ledger.quarantine_failed)
+            with self.assertRaises(OSError):
+                ledger.observe({"running": []})
+            with open(path, encoding="utf-8") as source:
+                self.assertEqual(source.read(), "not-json")
+
+    def test_retention_removes_oldest_ended_sessions_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = UsageLedger(os.path.join(directory, "usage.json"), maximum_sessions=2)
+            for session_id in ("one", "two", "three"):
+                ledger.observe({"running": [{
+                    "issue_identifier": "A-1", "session_id": session_id,
+                    "tokens": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                }]})
+            self.assertEqual(set(ledger.sessions), {"two", "three"})
+            self.assertIsNone(ledger.sessions["three"]["ended_at"])
+
+    def test_invalid_state_items_are_ignored_and_invalid_root_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = UsageLedger(os.path.join(directory, "usage.json"))
+            ledger.observe({"running": [None, {"session_id": 1, "issue_identifier": "A-1"}]})
+            self.assertEqual(ledger.sessions, {})
+            with self.assertRaises(ValueError):
+                ledger.observe([])
+
+    def test_atomic_replace_failure_preserves_prior_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "usage.json")
+            ledger = UsageLedger(path)
+            ledger.observe({"running": []})
+            with open(path, encoding="utf-8") as source:
+                prior = source.read()
+            with mock.patch("scaler.os.replace", side_effect=OSError("disk")):
+                with self.assertRaises(OSError):
+                    ledger.observe({"running": []})
+            with open(path, encoding="utf-8") as source:
+                self.assertEqual(source.read(), prior)
+            self.assertEqual(ledger.write_errors, 1)
 
 
 class DesiredWorkersTest(unittest.TestCase):

@@ -41,6 +41,8 @@ metadata:
     app: symphony-autoscaler
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: symphony-autoscaler
@@ -54,6 +56,8 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: autoscaler
           image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712-zero
@@ -80,6 +84,8 @@ spec:
               value: "15"
             - name: SCALE_DOWN_COOLDOWN_SECONDS
               value: "1200"
+            - name: USAGE_LEDGER_PATH
+              value: /var/lib/symphony-metrics/usage.json
           ports:
             - name: metrics
               containerPort: 8080
@@ -101,6 +107,9 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+          volumeMounts:
+            - name: usage-ledger
+              mountPath: /var/lib/symphony-metrics
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -109,6 +118,10 @@ spec:
             runAsGroup: 65532
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: usage-ledger
+          persistentVolumeClaim:
+            claimName: symphony-usage-ledger
 ---
 apiVersion: v1
 kind: Service
@@ -122,3 +135,16 @@ spec:
     - name: metrics
       port: 8080
       targetPort: metrics
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: symphony-usage-ledger
+  namespace: symphony
+spec:
+  storageClassName: do-block-storage
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
