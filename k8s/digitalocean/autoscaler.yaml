@@ -75,7 +75,7 @@ spec:
             - name: MAX_WORKERS
               value: "5"
             - name: AGENTS_PER_WORKER
-              value: "3"
+              value: "1"
             - name: POLL_INTERVAL_SECONDS
               value: "15"
             - name: SCALE_DOWN_COOLDOWN_SECONDS

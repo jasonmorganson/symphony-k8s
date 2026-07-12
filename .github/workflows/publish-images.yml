@@ -30,6 +30,8 @@ jobs:
         run: PYTHONPATH=autoscaler python3 -m unittest -v autoscaler/test_scaler.py
       - name: Test worker authentication
         run: bash tests/test-worker-auth.sh
+      - name: Test workflow cost controls
+        run: bash tests/test-workflow-cost-controls.sh
       - name: Build images
         run: |
           docker build -t symphony-runtime-base:do -f docker/runtime-base/Dockerfile .

@@ -176,7 +176,7 @@ would add a separate monthly charge.
 The `symphony-autoscaler` deployment polls Linear and Symphony every 15
 seconds. It counts runnable issues in `Todo`, `In Progress`, `Rework`, and
 `Merging`. Zero issues requests zero workers; active work requests one worker
-for each three issues, bounded to two through five workers. Scale-up is
+for each runnable issue, bounded to two through five workers. Scale-up is
 immediate. Scale-down requires no running or retrying sessions and 20 continuous
 minutes of reduced demand. Observation failures reset the cooldown and retain
 the current capacity.
@@ -234,8 +234,20 @@ pod does not receive it. An API rollback must restore both the prior image and
 the prior `envFrom: symphony-secrets` worker configuration.
 
 The pre-migration cost baseline on 2026-07-12 was approximately 49.5 million
-input tokens and 88 thousand output tokens. Token-churn optimization is tracked
-separately from this authentication migration.
+input tokens and 88 thousand output tokens; the later live total reached 68.9
+million input tokens. One issue consumed about 7.6 million input tokens across
+four agent turns. The optimized workflow uses high rather than xhigh reasoning,
+permits one agent per worker and one merge at a time,
+polls every 15 seconds, and does not dispatch agents for `Human Review`.
+
+Current-session per-issue and aggregate measurements are available from the
+private state API. Completed-issue history is not retained by this endpoint:
+
+```bash
+kubectl -n symphony port-forward svc/symphony-orchestrator 4000:4000
+curl -fsS http://127.0.0.1:4000/api/v1/state | jq \
+  '{running, retrying, codex_totals}'
+```
 
 Pause automatic worker changes during an incident:
 
