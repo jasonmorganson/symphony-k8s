@@ -8,6 +8,8 @@ metadata:
 spec:
   serviceName: symphony-worker
   replicas: 3
+  updateStrategy:
+    type: OnDelete
   selector:
     matchLabels:
       app: symphony-worker
