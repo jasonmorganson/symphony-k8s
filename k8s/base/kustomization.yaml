@@ -38,9 +38,6 @@ secretGenerator:
       - ssh_host_ed25519_key=generated/skaffold/ssh/ssh_host_ed25519_key
       - ssh_host_ed25519_key.pub=generated/skaffold/ssh/ssh_host_ed25519_key.pub
 
-generatorOptions:
-  disableNameSuffixHash: true
-
 images:
   - name: symphony-orchestrator
     newName: nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator
