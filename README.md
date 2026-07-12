@@ -247,13 +247,14 @@ million input tokens. One issue consumed about 7.6 million input tokens across
 four agent turns. The optimized workflow uses medium rather than xhigh reasoning,
 permits one agent per worker and one merge at a time,
 polls every 15 seconds, and does not dispatch agents for `Human Review`.
-Codex history compacts at 120,000 tokens rather than waiting for the model
-default, bounding carried conversation growth while the persistent workpad keeps
-the current plan, blockers, and validation evidence available.
 It also bounds the Linear workpad and consolidates asynchronous review findings
 before a full-repository gate on the final code-bearing tree, avoiding repeated
 context resubmission and full validation for each overlapping review comment.
 Later feedback-driven code changes invalidate and rerun that gate.
+A 120,000-token Codex auto-compaction override was tested and removed: during
+the short live A-142 debugging segment it showed no benefit and coincided with
+a higher observed input-token slope while adding compaction work. The workflow
+uses the model default.
 
 Current-session per-issue and aggregate measurements are available from the
 private state API. The autoscaler snapshots each observed Codex session to its
