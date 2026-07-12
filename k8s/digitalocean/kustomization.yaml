@@ -74,4 +74,4 @@ images:
     newTag: "20260712"
   - name: nscr.io/k7qcltdhpncg0/symphony-k8s/worker
     newName: ghcr.io/jasonmorganson/symphony-k8s-worker
-    newTag: "20260712"
+    newTag: "20260712-chatgpt"

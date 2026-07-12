@@ -7,6 +7,9 @@ on:
     paths:
       - docker/**
       - autoscaler/**
+      - docker/worker/**
+      - k8s/**
+      - tests/**
       - .github/workflows/publish-images.yml
 
 permissions:
@@ -25,6 +28,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Test autoscaler
         run: PYTHONPATH=autoscaler python3 -m unittest -v autoscaler/test_scaler.py
+      - name: Test worker authentication
+        run: bash tests/test-worker-auth.sh
       - name: Build images
         run: |
           docker build -t symphony-runtime-base:do -f docker/runtime-base/Dockerfile .
@@ -36,7 +41,7 @@ jobs:
             -f docker/orchestrator/Dockerfile .
           docker build \
             --build-arg RUNTIME_BASE=symphony-runtime-base:do \
-            -t ghcr.io/jasonmorganson/symphony-k8s-worker:20260712 \
+            -t ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt \
             -f docker/worker/Dockerfile .
           docker build \
             -t ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712-zero \
@@ -44,5 +49,5 @@ jobs:
       - name: Push images
         run: |
           docker push ghcr.io/jasonmorganson/symphony-k8s-orchestrator:20260712
-          docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712
+          docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt
           docker push ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712-zero
