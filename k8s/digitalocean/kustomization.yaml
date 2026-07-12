@@ -65,6 +65,8 @@ patches:
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: Always
   - path: single-node-worker-patch.yaml
+  - path: system-workloads-patch.yaml
+  - path: worker-pool-patch.yaml
 
 images:
   - name: nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator

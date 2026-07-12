@@ -1,0 +1,10 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: symphony-worker
+  namespace: symphony
+spec:
+  template:
+    spec:
+      nodeSelector:
+        doks.digitalocean.com/node-pool: symphony-ha

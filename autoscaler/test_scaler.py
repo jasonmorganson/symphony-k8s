@@ -4,7 +4,7 @@ from scaler import Scaler, desired_workers
 
 class DesiredWorkersTest(unittest.TestCase):
     def test_capacity_bands(self):
-        cases = {0: 2, 1: 2, 6: 2, 7: 3, 9: 3, 10: 4, 12: 4, 13: 5, 15: 5, 99: 5}
+        cases = {0: 0, 1: 2, 6: 2, 7: 3, 9: 3, 10: 4, 12: 4, 13: 5, 15: 5, 99: 5}
         for issues, expected in cases.items():
             with self.subTest(issues=issues):
                 self.assertEqual(desired_workers(issues), expected)
@@ -78,6 +78,25 @@ class ReconcileTest(unittest.TestCase):
         scaler.run_once()
         self.assertEqual(scaler.changes, [])
         scaler.clock = 1200
+        scaler.run_once()
+        self.assertEqual(scaler.changes, [2])
+
+    def test_zero_demand_scales_to_zero_after_idle_cooldown(self):
+        scaler = FakeScaler()
+        scaler.workers = 2
+        scaler.issues = 0
+        scaler.run_once()
+        scaler.clock = 1199
+        scaler.run_once()
+        self.assertEqual(scaler.changes, [])
+        scaler.clock = 1200
+        scaler.run_once()
+        self.assertEqual(scaler.changes, [0])
+
+    def test_new_work_wakes_two_workers_immediately(self):
+        scaler = FakeScaler()
+        scaler.workers = 0
+        scaler.issues = 1
         scaler.run_once()
         self.assertEqual(scaler.changes, [2])
 

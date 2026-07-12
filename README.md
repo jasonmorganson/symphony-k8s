@@ -156,23 +156,40 @@ It deliberately stays separate from the standalone `symphony-docker` Droplet:
 - orchestrator and worker workspaces use managed `do-block-storage` volumes
 - runtime images are pulled from GHCR, so node replacement is safe
 
-The production DOKS pool uses `s-4vcpu-8gb` workers with node-pool autoscaling
-from two to five nodes. The two-node floor preserves workload failover; the
-five-node ceiling caps worker compute near $240/month. DigitalOcean control
-plane HA remains disabled and would add a separate monthly charge.
+Production uses two separate node pools:
+
+- `symphony-system` is fixed at two `s-2vcpu-4gb` nodes (about $48/month). It
+  hosts the orchestrator, demand autoscaler, and Cloudflare connectors, and is
+  tainted `symphony.morganson.me/workload=system:NoSchedule`.
+- `symphony-ha` contains only `s-4vcpu-8gb` workers and autos-scales from zero
+  to five nodes. Active worker compute ranges from about $96 to $240/month.
+
+The fixed system tier keeps the dashboard and wake-up controller available
+when no worker nodes exist. DigitalOcean control-plane HA remains disabled and
+would add a separate monthly charge.
 
 ### Demand-based autoscaling
 
 The `symphony-autoscaler` deployment polls Linear and Symphony every 15
 seconds. It counts runnable issues in `Todo`, `In Progress`, `Rework`, and
-`Merging`, then requests one worker for each three issues, bounded to two through
-five workers. Scale-up is immediate. Scale-down requires no running or retrying
-sessions and 20 continuous minutes of reduced demand.
+`Merging`. Zero issues requests zero workers; active work requests one worker
+for each three issues, bounded to two through five workers. Scale-up is
+immediate. Scale-down requires no running or retrying sessions and 20 continuous
+minutes of reduced demand. Observation failures reset the cooldown and retain
+the current capacity.
 
 Each worker has strict hostname spreading, so a pending worker makes the DOKS
-Cluster Autoscaler add a node. Configure the `symphony-ha` pool with minimum 2
-and maximum 5 nodes. StatefulSet PVCs are retained after scale-down so work can
+Cluster Autoscaler add a node. Configure `symphony-ha` with minimum 0 and
+maximum 5 nodes. StatefulSet PVCs are retained after scale-down so work can
 resume safely; those block-storage volumes continue to incur storage charges.
+
+The idle metric is `symphony_autoscaler_idle`; active capacity retains a
+two-worker failover floor. To distinguish the tiers operationally:
+
+```bash
+kubectl get nodes -L doks.digitalocean.com/node-pool
+kubectl -n symphony get pods -o wide
+```
 
 Pause automatic worker changes during an incident:
 
