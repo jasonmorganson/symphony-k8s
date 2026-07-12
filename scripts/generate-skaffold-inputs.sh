@@ -36,9 +36,14 @@ write_if_changed() {
 }
 
 workflow_file="${SYMPHONY_WORKFLOW_FILE:-$ROOT_DIR/../arrusted-development/WORKFLOW.md}"
+runtime_file="$ROOT_DIR/config/workflow-runtime.yaml"
 if [[ ! -f "$workflow_file" ]]; then
   printf 'Missing canonical workflow: %s\n' "$workflow_file" >&2
   printf 'Set SYMPHONY_WORKFLOW_FILE to the checked-out arrusted-development/WORKFLOW.md.\n' >&2
+  exit 1
+fi
+if [[ ! -f "$runtime_file" ]]; then
+  printf 'Missing Kubernetes workflow runtime configuration: %s\n' "$runtime_file" >&2
   exit 1
 fi
 
@@ -84,4 +89,10 @@ ${GITHUB_TOKEN:+GITHUB_TOKEN=${GITHUB_TOKEN}}
 EOF
 )"
 
-write_if_changed "$workflow_dir/WORKFLOW.md" "$(cat "$workflow_file")"
+workflow_body="$(awk 'BEGIN { separators = 0 } /^---$/ { separators++; next } separators >= 2 { print }' "$workflow_file")"
+if [[ -z "$workflow_body" ]]; then
+  printf 'Canonical workflow has no prompt body after YAML front matter: %s\n' "$workflow_file" >&2
+  exit 1
+fi
+
+write_if_changed "$workflow_dir/WORKFLOW.md" "$(printf '%s\n%s\n%s\n%s' '---' "$(cat "$runtime_file")" '---' "$workflow_body")"
