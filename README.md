@@ -251,6 +251,9 @@ It also bounds the Linear workpad and consolidates asynchronous review findings
 before a full-repository gate on the final code-bearing tree, avoiding repeated
 context resubmission and full validation for each overlapping review comment.
 Later feedback-driven code changes invalidate and rerun that gate.
+Required review panels inspect the diff and existing evidence; they use targeted
+reproductions for suspected defects instead of each launching the same full
+matrix. The primary agent owns the authoritative final gate.
 A 120,000-token Codex auto-compaction override was tested and removed: during
 the short live A-142 debugging segment it showed no benefit and coincided with
 a higher observed input-token slope while adding compaction work. The workflow

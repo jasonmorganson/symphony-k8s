@@ -135,6 +135,11 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
   current issue as `related`, and use `blockedBy` when the follow-up depends on
   the current issue.
 - Move status only when the matching quality bar is met.
+- For required subagent or panel review, the primary agent supplies the current
+  diff, acceptance criteria, and existing validation evidence. Reviewers inspect
+  those artifacts and may run a narrow reproduction for a specific suspected
+  defect, but must not independently rerun the full repository gate or broad
+  matrix. The primary agent owns the single authoritative final gate.
 - Operate autonomously end-to-end unless blocked by missing requirements, secrets, or permissions.
 - Use the blocked-access escape hatch only for true external blockers (missing required tools/auth) after exhausting documented fallbacks.
 
