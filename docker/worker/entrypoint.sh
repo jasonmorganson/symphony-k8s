@@ -14,13 +14,16 @@ trim_secret OPENAI_API_KEY
 
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   trim_secret GITHUB_TOKEN
-  git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
-  git config --global --add url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
-  git config --global --add url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+  install -d -m 0700 -o symphony -g symphony /home/symphony
+  printf 'machine github.com\nlogin x-access-token\npassword %s\n' "$GITHUB_TOKEN" \
+    > /home/symphony/.netrc
+  chown symphony:symphony /home/symphony/.netrc
+  chmod 0600 /home/symphony/.netrc
 fi
 
-if ! runuser -u symphony -- codex login status >/dev/null 2>&1; then
-  printf '%s\n' "$OPENAI_API_KEY" | runuser -u symphony -- codex login --with-api-key >/dev/null
+if ! runuser -u symphony -- env HOME=/home/symphony codex login status >/dev/null 2>&1; then
+  printf '%s\n' "$OPENAI_API_KEY" | \
+    runuser -u symphony -- env HOME=/home/symphony codex login --with-api-key >/dev/null
 fi
 
 mkdir -p /srv/symphony/workspaces /home/symphony/.ssh /run/sshd
