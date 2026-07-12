@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+
+patches:
+  - path: private-service-patch.yaml
+  - path: single-node-worker-patch.yaml
+
+images:
+  - name: nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator
+    newName: symphony-orchestrator
+    newTag: do
+  - name: nscr.io/k7qcltdhpncg0/symphony-k8s/worker
+    newName: symphony-worker
+    newTag: do
+
