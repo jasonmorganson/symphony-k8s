@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-required=(LINEAR_API_KEY OPENAI_API_KEY LINEAR_PROJECT_SLUG REPO_URL)
+required=(LINEAR_API_KEY OPENAI_API_KEY)
 missing=()
 for name in "${required[@]}"; do
   if [[ -z "${!name:-}" ]]; then
@@ -35,9 +35,10 @@ write_if_changed() {
   mv "$tmp" "$target"
 }
 
-template_file="$ROOT_DIR/workflow/WORKFLOW.md"
-if [[ ! -f "$template_file" ]]; then
-  printf 'Missing workflow template: %s\n' "$template_file" >&2
+workflow_file="${SYMPHONY_WORKFLOW_FILE:-$ROOT_DIR/../arrusted-development/WORKFLOW.md}"
+if [[ ! -f "$workflow_file" ]]; then
+  printf 'Missing canonical workflow: %s\n' "$workflow_file" >&2
+  printf 'Set SYMPHONY_WORKFLOW_FILE to the checked-out arrusted-development/WORKFLOW.md.\n' >&2
   exit 1
 fi
 
@@ -83,13 +84,4 @@ ${GITHUB_TOKEN:+GITHUB_TOKEN=${GITHUB_TOKEN}}
 EOF
 )"
 
-escape_sed_replacement() {
-  printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
-}
-
-rendered_workflow="$(sed \
-  -e "s|__LINEAR_PROJECT_SLUG__|$(escape_sed_replacement "$LINEAR_PROJECT_SLUG")|g" \
-  -e "s|__REPO_URL__|$(escape_sed_replacement "$REPO_URL")|g" \
-  "$template_file")"
-
-write_if_changed "$workflow_dir/WORKFLOW.md" "$rendered_workflow"
+write_if_changed "$workflow_dir/WORKFLOW.md" "$(cat "$workflow_file")"
