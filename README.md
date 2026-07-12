@@ -239,6 +239,9 @@ million input tokens. One issue consumed about 7.6 million input tokens across
 four agent turns. The optimized workflow uses medium rather than xhigh reasoning,
 permits one agent per worker and one merge at a time,
 polls every 15 seconds, and does not dispatch agents for `Human Review`.
+Codex history compacts at 120,000 tokens rather than waiting for the model
+default, bounding carried conversation growth while the persistent workpad keeps
+the current plan, blockers, and validation evidence available.
 It also bounds the Linear workpad and consolidates asynchronous review findings
 before a full-repository gate on the final code-bearing tree, avoiding repeated
 context resubmission and full validation for each overlapping review comment.
