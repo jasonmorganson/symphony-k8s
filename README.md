@@ -189,6 +189,10 @@ Each worker has strict hostname spreading, so a pending worker makes the DOKS
 Cluster Autoscaler add a node. Configure `symphony-ha` with minimum 0 and
 maximum 5 nodes. StatefulSet PVCs are retained after scale-down so work can
 resume safely; those block-storage volumes continue to incur storage charges.
+The worker StatefulSet uses `OnDelete` updates so manifest or image changes do
+not terminate active SSH sessions. Roll worker ordinals manually only after the
+dashboard reports that the target worker is idle; replica scaling remains under
+the autoscaler's control.
 
 The idle metric is `symphony_autoscaler_idle`; active capacity retains a
 two-worker failover floor. To distinguish the tiers operationally:
