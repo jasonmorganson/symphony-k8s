@@ -61,7 +61,7 @@ agent:
   max_concurrent_agents_by_state:
     Merging: 1
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=medium --model gpt-5.3-codex app-server
+  command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=medium --config model_auto_compact_token_limit=120000 --config model_auto_compact_token_limit_scope=total --model gpt-5.3-codex app-server
   approval_policy: never
   thread_sandbox: danger-full-access
   turn_sandbox_policy:
