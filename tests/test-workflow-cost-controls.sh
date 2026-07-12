@@ -4,6 +4,21 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 worker_patch="$ROOT_DIR/k8s/digitalocean/single-node-worker-patch.yaml"
 worker_statefulset="$ROOT_DIR/k8s/base/worker-statefulset.yaml"
+runtime="$ROOT_DIR/config/workflow-runtime.yaml"
+generator="$ROOT_DIR/scripts/generate-skaffold-inputs.sh"
+
+grep -q '^worker:$' "$runtime"
+grep -q 'symphony-worker-4.symphony-worker.symphony.svc.cluster.local' "$runtime"
+grep -q '^  root: /srv/symphony/workspaces$' "$runtime"
+grep -q 'model_reasoning_effort=medium' "$runtime"
+grep -q 'agents.max_threads=3' "$runtime"
+grep -q 'workflow_body=.*awk' "$generator"
+grep -q "SYMPHONY_WORKFLOW_FILE" "$generator"
+
+if grep -q '^## ' "$runtime"; then
+  echo "runtime front matter must not fork canonical behavioral instructions" >&2
+  exit 1
+fi
 
 grep -A5 'requests:' "$worker_patch" | grep -q 'cpu: "2"'
 grep -A5 'requests:' "$worker_patch" | grep -q 'memory: 4Gi'
