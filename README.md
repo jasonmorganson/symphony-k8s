@@ -239,6 +239,10 @@ million input tokens. One issue consumed about 7.6 million input tokens across
 four agent turns. The optimized workflow uses medium rather than xhigh reasoning,
 permits one agent per worker and one merge at a time,
 polls every 15 seconds, and does not dispatch agents for `Human Review`.
+It also bounds the Linear workpad and consolidates asynchronous review findings
+before a full-repository gate on the final code-bearing tree, avoiding repeated
+context resubmission and full validation for each overlapping review comment.
+Later feedback-driven code changes invalidate and rerun that gate.
 
 Current-session per-issue and aggregate measurements are available from the
 private state API. Completed-issue history is not retained by this endpoint:

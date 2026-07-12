@@ -36,7 +36,7 @@ hooks:
           ;;
       esac
     fi
-    git clone --depth 1 __REPO_URL__ .
+    git clone --filter=blob:none __REPO_URL__ .
     if command -v mise >/dev/null 2>&1; then
       mise trust .
       mise install
@@ -122,6 +122,11 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - Keep ticket metadata current (state, checklist, acceptance criteria, links).
 - Treat a single persistent Linear comment as the source of truth for progress.
 - Use that single workpad comment for all progress and handoff notes; do not post separate "done"/summary comments.
+- Keep the workpad compact: it is current state, not an append-only execution log.
+  Replace superseded retry notes and validation results instead of appending
+  another copy. Keep at most 12 concise `Notes` bullets; collapse older attempts
+  into one checkpoint containing the last published commit, remaining blockers,
+  and latest relevant validation. Never copy full reviewer prose into it.
 - Treat any ticket-authored `Validation`, `Test Plan`, or `Testing` section as non-negotiable acceptance input: mirror it in the workpad and execute it before considering the work complete.
 - When meaningful out-of-scope improvements are discovered during execution,
   file a separate Linear issue instead of expanding scope. The follow-up issue
@@ -210,16 +215,29 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 When a ticket has an attached PR, run this protocol before moving to `Human Review`:
 
 1. Identify the PR number from issue links/attachments.
-2. Gather feedback from all channels:
+2. Before editing, gather feedback from all channels in one discovery pass:
    - Top-level PR comments (`gh pr view --comments`).
    - Inline review comments (`gh api repos/<owner>/<repo>/pulls/<pr>/comments`).
    - Review summaries/states (`gh pr view --json reviews`).
+   - Resolved and unresolved review threads via a paginated `gh api graphql`
+     `reviewThreads(first: 100, after: $cursor)` query. Continue until
+     `pageInfo.hasNextPage` is false; REST inline comments alone do not prove
+     thread resolution state.
 3. Treat every actionable reviewer comment (human or bot), including inline review comments, as blocking until one of these is true:
    - code/test/docs updated to address it, or
    - explicit, justified pushback reply is posted on that thread.
-4. Update the workpad plan/checklist to include each feedback item and its resolution status.
-5. Re-run validation after feedback-driven changes and push updates.
-6. Repeat this sweep until there are no outstanding actionable comments.
+4. Deduplicate overlapping findings by root cause and record only the compact
+   root-cause checklist in the workpad. Resolve the complete discovered batch
+   before requesting another review pass.
+5. Run targeted validation while resolving the batch. Do not rerun the full
+   repository gate after each individual finding.
+6. Wait for already-triggered asynchronous reviewers to finish, then perform one
+   consolidation sweep. Address any genuinely new actionable findings as one
+   final batch, rerun targeted checks, and run the full required gate on the
+   final code-bearing tree before publishing. Any later feedback-driven code
+   change invalidates that gate and requires it to be rerun; reply-only or
+   no-code resolutions do not. Unchanged historical threads do not start a new
+   cycle.
 
 ## Blocked-access escape hatch (required behavior)
 
@@ -243,7 +261,9 @@ Use this only when completion is blocked by missing required tools or missing au
     - Check off completed items.
     - Add newly discovered items in the appropriate section.
     - Keep parent/child structure intact as scope evolves.
-    - Update the workpad immediately after each meaningful milestone (for example: reproduction complete, code change landed, validation run, review feedback addressed).
+    - Update the workpad at phase boundaries (reproduction, implementation,
+      consolidated feedback, final validation), replacing stale evidence rather
+      than appending a retry diary.
     - Never leave completed work unchecked in the plan.
     - For tickets that started as `Todo` with an attached PR, run the full PR feedback sweep protocol immediately after kickoff and before new feature work.
 5.  Run validation/tests required for the scope.
@@ -254,7 +274,9 @@ Use this only when completion is blocked by missing required tools or missing au
     - Document these temporary proof steps and outcomes in the workpad `Validation`/`Notes` sections so reviewers can follow the evidence.
     - If app-touching, run `launch-app` validation and capture/upload media via `github-pr-media` before handoff.
 6.  Re-check all acceptance criteria and close any gaps.
-7.  Before every `git push` attempt, run the required validation for your scope and confirm it passes; if it fails, address issues and rerun until green, then commit and push changes.
+7.  Before a `git push`, run targeted validation for the changed scope. After
+    the consolidated feedback batch, run the full repository gate on the final
+    code-bearing tree. Rerun it whenever later feedback changes that tree.
 8.  Attach PR URL to the issue (prefer attachment; use the workpad comment only if attachment is unavailable).
     - Ensure the GitHub PR has label `symphony` (add it if missing).
 9.  Merge latest `origin/main` into branch, resolve conflicts, and rerun checks.
@@ -269,7 +291,8 @@ Use this only when completion is blocked by missing required tools or missing au
     - Run the full PR feedback sweep protocol.
     - Confirm PR checks are passing (green) after the latest changes.
     - Confirm every required ticket-provided validation/test-plan item is explicitly marked complete in the workpad.
-    - Repeat this check-address-verify loop until no outstanding comments remain and checks are fully passing.
+    - Use the consolidated feedback protocol above: batch findings, wait for
+      pending reviewers, and avoid repeated full gates on intermediate trees.
     - Re-open and refresh the workpad before state transition so `Plan`, `Acceptance Criteria`, and `Validation` exactly match completed work.
 12. Only then move issue to `Human Review`.
     - Exception: if blocked by missing required non-GitHub tools/auth per the blocked-access escape hatch, move to `Human Review` with the blocker brief and explicit unblock actions.
