@@ -3,10 +3,12 @@ FROM ${RUNTIME_BASE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server \
+    gh \
     build-essential \
     python3 \
     pkg-config \
     libssl-dev \
+    && gh --version \
     && rm -rf /var/lib/apt/lists/*
 
 ARG MISE_VERSION=2026.7.5
