@@ -77,12 +77,26 @@ configure_github_auth() {
     return 1
   fi
 
-  # SSH commands inherit these values from sshd, so a workspace-local Git
-  # config cannot silently replace the machine author or committer.
-  export GIT_AUTHOR_NAME="$GITHUB_MACHINE_NAME"
-  export GIT_AUTHOR_EMAIL="$GITHUB_MACHINE_EMAIL"
-  export GIT_COMMITTER_NAME="$GITHUB_MACHINE_NAME"
-  export GIT_COMMITTER_EMAIL="$GITHUB_MACHINE_EMAIL"
+}
+
+verify_sshd_git_identity() {
+  local effective_setenv expected
+
+  effective_setenv="$(sshd -T | awk '
+    $1 == "setenv" {
+      for (field = 2; field <= NF; field += 1) print $field
+    }
+  ')"
+  for expected in \
+    "GIT_AUTHOR_NAME=$GITHUB_MACHINE_NAME" \
+    "GIT_AUTHOR_EMAIL=$GITHUB_MACHINE_EMAIL" \
+    "GIT_COMMITTER_NAME=$GITHUB_MACHINE_NAME" \
+    "GIT_COMMITTER_EMAIL=$GITHUB_MACHINE_EMAIL"; do
+    if ! grep -Fqx "$expected" <<<"$effective_setenv"; then
+      echo "sshd does not enforce the required Git machine identity" >&2
+      return 1
+    fi
+  done
 }
 
 verify_codex_chatgpt_auth() {
@@ -98,6 +112,7 @@ main() {
 trim_secret LINEAR_API_KEY
 verify_required_commands
 configure_github_auth
+verify_sshd_git_identity
 verify_codex_chatgpt_auth
 
 mkdir -p "$SYMPHONY_WORKSPACE_ROOT" "$SYMPHONY_HOME/.ssh" /run/sshd
