@@ -84,10 +84,6 @@ assert_machine_identity_result() {
   output="$(<"$output_file")"
   if [[ "$expected" == success ]]; then
     [[ "$rc" -eq 0 ]]
-    [[ "$GIT_AUTHOR_NAME" == "$GITHUB_MACHINE_NAME" ]]
-    [[ "$GIT_AUTHOR_EMAIL" == "$GITHUB_MACHINE_EMAIL" ]]
-    [[ "$GIT_COMMITTER_NAME" == "$GITHUB_MACHINE_NAME" ]]
-    [[ "$GIT_COMMITTER_EMAIL" == "$GITHUB_MACHINE_EMAIL" ]]
   else
     [[ "$rc" -ne 0 ]]
     if [[ "$repository_access" == failure ]]; then
@@ -103,14 +99,40 @@ assert_machine_identity_result() {
   [[ "$netrc_mode" == 600 ]]
 
   unset -f install chown chmod runuser
-  unset GITHUB_TOKEN GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL
-  unset GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
+  unset GITHUB_TOKEN
   rm -rf "$tmp_home"
 }
 
 assert_machine_identity_result "autograph-symphony" success
 assert_machine_identity_result "jasonmorganson" failure
 assert_machine_identity_result "autograph-symphony" failure failure
+
+assert_sshd_identity_result() {
+  local mode="$1" expected="$2" output rc=0
+  sshd() {
+    [[ "${1:-}" == -T ]] || return 99
+    if [[ "$mode" == complete ]]; then
+      cat <<EOF
+setenv GIT_AUTHOR_NAME=$GITHUB_MACHINE_NAME GIT_AUTHOR_EMAIL=$GITHUB_MACHINE_EMAIL
+setenv GIT_COMMITTER_NAME=$GITHUB_MACHINE_NAME GIT_COMMITTER_EMAIL=$GITHUB_MACHINE_EMAIL
+EOF
+    else
+      printf '%s\n' "setenv GIT_AUTHOR_NAME=$GITHUB_MACHINE_NAME"
+    fi
+  }
+
+  output="$(verify_sshd_git_identity 2>&1)" || rc=$?
+  if [[ "$expected" == success ]]; then
+    [[ "$rc" -eq 0 && -z "$output" ]]
+  else
+    [[ "$rc" -ne 0 ]]
+    [[ "$output" == *"sshd does not enforce the required Git machine identity"* ]]
+  fi
+  unset -f sshd
+}
+
+assert_sshd_identity_result complete success
+assert_sshd_identity_result incomplete failure
 
 unset GITHUB_TOKEN
 missing_rc=0
@@ -147,9 +169,11 @@ grep -q 'gh api user --jq .login' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'GITHUB_MACHINE_LOGIN="autograph-symphony"' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'GITHUB_MACHINE_EMAIL="jason+symphony@withgraph.com"' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'git config --global user.useConfigOnly true' "$ROOT_DIR/docker/worker/entrypoint.sh"
-grep -q 'export GIT_COMMITTER_NAME="$GITHUB_MACHINE_NAME"' \
-  "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'verify_sshd_git_identity' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'git ls-remote --exit-code' "$ROOT_DIR/docker/worker/entrypoint.sh"
+sshd_config="$ROOT_DIR/config/sshd_config.d/worker.conf"
+setenv_line='SetEnv GIT_AUTHOR_NAME=autograph-symphony GIT_AUTHOR_EMAIL=jason+symphony@withgraph.com GIT_COMMITTER_NAME=autograph-symphony GIT_COMMITTER_EMAIL=jason+symphony@withgraph.com'
+grep -Fqx "$setenv_line" "$sshd_config"
 grep -A5 'name: GITHUB_TOKEN' "${worker_manifests[0]}" | \
   grep -q 'name: github-machine-arrusted-symphony'
 grep -A5 'name: GITHUB_TOKEN' "${worker_manifests[0]}" | grep -q 'key: token'
