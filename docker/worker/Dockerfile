@@ -20,7 +20,8 @@ RUN mkdir -p /srv/symphony/workspaces /etc/ssh/keys /run/sshd \
 RUN mkdir -p /etc/ssh/sshd_config.d
 COPY config/sshd_config.d/worker.conf /etc/ssh/sshd_config.d/worker.conf
 COPY docker/worker/entrypoint.sh /usr/local/bin/worker-entrypoint.sh
-RUN chmod +x /usr/local/bin/worker-entrypoint.sh
+COPY docker/worker/bootstrap-arrusted-workspace.sh /usr/local/bin/bootstrap-arrusted-workspace
+RUN chmod +x /usr/local/bin/worker-entrypoint.sh /usr/local/bin/bootstrap-arrusted-workspace
 
 EXPOSE 22
 ENTRYPOINT ["/usr/local/bin/worker-entrypoint.sh"]

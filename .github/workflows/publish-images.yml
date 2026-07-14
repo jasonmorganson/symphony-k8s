@@ -30,6 +30,8 @@ jobs:
         run: PYTHONPATH=autoscaler python3 -m unittest -v autoscaler/test_scaler.py
       - name: Test worker authentication
         run: bash tests/test-worker-auth.sh
+      - name: Test workspace bootstrap
+        run: bash tests/test-workspace-bootstrap.sh
       - name: Test workflow cost controls
         run: bash tests/test-workflow-cost-controls.sh
       - name: Build images
@@ -43,8 +45,11 @@ jobs:
             -f docker/orchestrator/Dockerfile .
           docker build \
             --build-arg RUNTIME_BASE=symphony-runtime-base:do \
+            -t ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA} \
             -t ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt \
             -f docker/worker/Dockerfile .
+          docker run --rm --entrypoint gh \
+            ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA} --version
           docker build \
             -t ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712-zero \
             -f docker/autoscaler/Dockerfile .
@@ -52,4 +57,5 @@ jobs:
         run: |
           docker push ghcr.io/jasonmorganson/symphony-k8s-orchestrator:20260712
           docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt
+          docker push ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}
           docker push ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712-zero
