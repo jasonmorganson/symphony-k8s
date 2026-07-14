@@ -102,7 +102,7 @@ spec:
               command:
                 - sh
                 - -c
-                - runuser -u symphony -- env HOME=/home/symphony codex login status 2>&1 | grep -Fq 'Logged in using ChatGPT'
+                - test -f /run/symphony-worker-ready && runuser -u symphony -- env HOME=/home/symphony codex login status 2>&1 | grep -Fq 'Logged in using ChatGPT'
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:
@@ -121,7 +121,6 @@ spec:
                 secretKeyRef:
                   name: symphony-secrets
                   key: GITHUB_TOKEN
-                  optional: true
           securityContext:
             allowPrivilegeEscalation: false
           volumeMounts:
