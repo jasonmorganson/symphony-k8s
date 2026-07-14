@@ -160,9 +160,6 @@ if grep -A5 'name: GITHUB_TOKEN' "${worker_manifests[0]}" | \
   exit 1
 fi
 
-if grep -A6 'key: GITHUB_TOKEN' "${worker_manifests[0]}" | grep -q 'optional: true'; then
-  echo "worker GitHub credential must fail closed" >&2
-  exit 1
-fi
+grep -A6 'name: GITHUB_TOKEN' "${worker_manifests[0]}" | grep -q 'optional: false'
 
 echo "worker authentication tests passed"

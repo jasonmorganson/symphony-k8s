@@ -121,6 +121,7 @@ spec:
                 secretKeyRef:
                   name: github-machine-arrusted-symphony
                   key: token
+                  optional: false
           securityContext:
             allowPrivilegeEscalation: false
           volumeMounts:
