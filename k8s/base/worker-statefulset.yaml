@@ -119,8 +119,8 @@ spec:
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: symphony-secrets
-                  key: GITHUB_TOKEN
+                  name: github-machine-arrusted-symphony
+                  key: token
           securityContext:
             allowPrivilegeEscalation: false
           volumeMounts:
