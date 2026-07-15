@@ -71,7 +71,7 @@ patches:
 images:
   - name: nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator
     newName: ghcr.io/jasonmorganson/symphony-k8s-orchestrator
-    newTag: "20260712"
+    digest: sha256:4c731e8a43c155137f8fd776459505ba5591558db44d582644f4d1bea727b349
   - name: nscr.io/k7qcltdhpncg0/symphony-k8s/worker
     newName: ghcr.io/jasonmorganson/symphony-k8s-worker
     newTag: "20260712-chatgpt"
