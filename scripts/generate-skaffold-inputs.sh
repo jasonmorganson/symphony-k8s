@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-required=(LINEAR_API_KEY OPENAI_API_KEY)
+required=(LINEAR_API_KEY OPENAI_API_KEY SYMPHONY_WORKER_DRAIN_TOKEN)
 missing=()
 for name in "${required[@]}"; do
   if [[ -z "${!name:-}" ]]; then
@@ -85,6 +85,7 @@ EOF
 write_if_changed "$secrets_dir/symphony-secrets.env" "$(cat <<EOF
 LINEAR_API_KEY=${LINEAR_API_KEY}
 OPENAI_API_KEY=${OPENAI_API_KEY}
+SYMPHONY_WORKER_DRAIN_TOKEN=${SYMPHONY_WORKER_DRAIN_TOKEN}
 ${GITHUB_TOKEN:+GITHUB_TOKEN=${GITHUB_TOKEN}}
 EOF
 )"

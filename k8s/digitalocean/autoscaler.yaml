@@ -74,6 +74,11 @@ spec:
                   key: LINEAR_API_KEY
             - name: LINEAR_PROJECT_SLUG
               value: arrusted-development-71c3d9986f6d
+            - name: SYMPHONY_WORKER_DRAIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: symphony-secrets
+                  key: SYMPHONY_WORKER_DRAIN_TOKEN
             - name: MIN_WORKERS
               value: "2"
             - name: MAX_WORKERS

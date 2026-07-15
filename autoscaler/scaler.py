@@ -221,6 +221,42 @@ def issue_is_runnable(issue):
     return True
 
 
+def worker_pool_activity(state, current_workers, statefulset="symphony-worker"):
+    if not isinstance(state, dict) or not isinstance(state.get("counts"), dict) \
+            or not isinstance(state.get("running"), list) or not isinstance(state.get("retrying"), list):
+        raise ValueError("invalid Symphony activity state")
+    pool = state.get("worker_pool")
+    if not isinstance(pool, dict) or not isinstance(pool.get("configured_hosts"), list) \
+            or not isinstance(pool.get("drained_hosts"), list):
+        raise ValueError("invalid Symphony worker pool state")
+    configured = pool["configured_hosts"]
+    drained = pool["drained_hosts"]
+    if len(configured) < current_workers \
+            or any(not isinstance(host, str) or not host for host in configured) \
+            or any(host not in configured for host in drained):
+        raise ValueError("inconsistent Symphony worker pool state")
+    if len(set(configured)) != len(configured):
+        raise ValueError("duplicate Symphony worker hosts")
+    for ordinal, host in enumerate(configured):
+        if host.split(".", 1)[0] != f"{statefulset}-{ordinal}":
+            raise ValueError("Symphony worker hosts do not match StatefulSet ordinals")
+    running_count = state["counts"].get("running")
+    retrying_count = state["counts"].get("retrying")
+    if type(running_count) is not int or running_count < 0 \
+            or type(retrying_count) is not int or retrying_count < 0 \
+            or running_count != len(state["running"]) \
+            or retrying_count != len(state["retrying"]):
+        raise ValueError("inconsistent Symphony activity counts")
+    active_hosts = []
+    for session in state["running"] + state["retrying"]:
+        host = session.get("worker_host") if isinstance(session, dict) else None
+        if host not in configured:
+            raise ValueError("active Symphony session has unknown worker placement")
+        active_hosts.append(host)
+    floor = max((configured.index(host) + 1 for host in active_hosts), default=0)
+    return running_count + retrying_count, floor, configured
+
+
 class Scaler:
     def __init__(self, now=time.monotonic):
         self.now = now
@@ -229,6 +265,11 @@ class Scaler:
         self.project_slug = os.environ["LINEAR_PROJECT_SLUG"]
         self.linear_key = os.environ["LINEAR_API_KEY"]
         self.symphony_url = os.getenv("SYMPHONY_STATE_URL", "http://symphony-orchestrator:4000/api/v1/state")
+        self.symphony_drains_url = os.getenv(
+            "SYMPHONY_DRAINS_URL", "http://symphony-orchestrator:4000/api/v1/worker-drains")
+        self.symphony_drain_token = os.environ["SYMPHONY_WORKER_DRAIN_TOKEN"]
+        if len(self.symphony_drain_token) < 32:
+            raise ValueError("SYMPHONY_WORKER_DRAIN_TOKEN must contain at least 32 characters")
         self.minimum = int(os.getenv("MIN_WORKERS", "2"))
         self.maximum = int(os.getenv("MAX_WORKERS", "5"))
         self.agents_per_worker = int(os.getenv("AGENTS_PER_WORKER", "1"))
@@ -240,7 +281,7 @@ class Scaler:
         self.low_demand_since = None
         self.usage_ledger = UsageLedger(os.getenv("USAGE_LEDGER_PATH", "/var/lib/symphony-metrics/usage.json"))
         self.metrics = {"healthy": 0, "desired": self.minimum, "queue": 0, "blocked": 0,
-                        "current": self.minimum,
+                        "current": self.minimum, "drained": 0,
                         "cooldown": 0, "errors": 0, "ledger_errors": 0,
                         "last_error": "starting"}
 
@@ -291,11 +332,16 @@ class Scaler:
             self.metrics["ledger_errors"] += 1
         return state
 
-    def symphony_busy(self):
-        state = self.symphony_state()
-        counts = state.get("counts", {})
-        return int(counts.get("running", len(state.get("running", [])))) + \
-            int(counts.get("retrying", len(state.get("retrying", []))))
+    def set_worker_drains(self, hosts):
+        body = json.dumps({"drained_worker_hosts": hosts}).encode()
+        result = self.request_json(
+            self.symphony_drains_url, data=body,
+            headers={"Authorization": f"Bearer {self.symphony_drain_token}",
+                     "Content-Type": "application/json"}, method="PUT")
+        if result.get("drained_hosts") != sorted(hosts) \
+                or not isinstance(result.get("active_drained_hosts"), list):
+            raise ValueError("invalid Symphony worker drain acknowledgement")
+        return result
 
     def scale_url(self):
         return (f"https://{self.kube_host}:{self.kube_port}/apis/apps/v1/namespaces/"
@@ -315,30 +361,76 @@ class Scaler:
                           headers={"Authorization": f"Bearer {self.token}",
                                    "Content-Type": "application/json"}, method="PUT", context=self.ssl_context)
 
+    def pods_url(self):
+        return (f"https://{self.kube_host}:{self.kube_port}/api/v1/namespaces/"
+                f"{self.namespace}/pods?labelSelector=app%3Dsymphony-worker")
+
+    def ready_workers(self, configured_hosts, current_workers):
+        pods = self.request_json(self.pods_url(), headers={"Authorization": f"Bearer {self.token}"},
+                                 context=self.ssl_context)
+        ready_names = set()
+        for pod in pods.get("items", []):
+            name = pod.get("metadata", {}).get("name")
+            conditions = pod.get("status", {}).get("conditions", [])
+            if any(condition.get("type") == "Ready" and condition.get("status") == "True"
+                   for condition in conditions):
+                ready_names.add(name)
+        ready = 0
+        for host in configured_hosts[:current_workers]:
+            if host.split(".", 1)[0] not in ready_names:
+                break
+            ready += 1
+        return ready
+
     def reconcile(self):
         issue_count, blocked_count = self.linear_issue_count()
-        busy = self.symphony_busy()
+        state = self.symphony_state()
         current, resource_version = self.current_workers()
+        busy, active_floor, configured_hosts = worker_pool_activity(state, current, self.statefulset)
+        ready = self.ready_workers(configured_hosts, current)
         target = desired_workers(issue_count, self.agents_per_worker, self.minimum, self.maximum)
+        if target > len(configured_hosts):
+            raise ValueError("autoscaler target exceeds configured Symphony worker hosts")
         now = self.now()
+        drained_count = 0
         if target > current:
-            self.set_workers(target, resource_version)
-            current = target
-            self.low_demand_since = None
-        elif target < current:
-            if busy:
-                self.low_demand_since = None
-            elif self.low_demand_since is None:
-                self.low_demand_since = now
-            elif now - self.low_demand_since >= self.cooldown_seconds:
+            acknowledgement = self.set_worker_drains(configured_hosts[ready:])
+            drained_count = len(acknowledgement["drained_hosts"])
+            if not acknowledgement["active_drained_hosts"]:
                 self.set_workers(target, resource_version)
                 current = target
                 self.low_demand_since = None
+        elif target < current:
+            if busy:
+                self.low_demand_since = None
+                safe_target = max(target, active_floor)
+                if safe_target < current:
+                    acknowledgement = self.set_worker_drains(configured_hosts[safe_target:])
+                    drained_count = len(acknowledgement["drained_hosts"])
+                    if not acknowledgement["active_drained_hosts"]:
+                        self.set_workers(safe_target, resource_version)
+                        current = safe_target
+                else:
+                    drained_count = len(self.set_worker_drains(configured_hosts[current:])["drained_hosts"])
+            elif self.low_demand_since is None:
+                self.low_demand_since = now
+                drained_count = len(self.set_worker_drains(configured_hosts[current:])["drained_hosts"])
+            elif now - self.low_demand_since >= self.cooldown_seconds:
+                acknowledgement = self.set_worker_drains(configured_hosts[target:])
+                drained_count = len(acknowledgement["drained_hosts"])
+                if not acknowledgement["active_drained_hosts"]:
+                    self.set_workers(target, resource_version)
+                    current = target
+                    self.low_demand_since = None
+            else:
+                drained_count = len(self.set_worker_drains(configured_hosts[current:])["drained_hosts"])
         else:
             self.low_demand_since = None
+            drained_count = len(
+                self.set_worker_drains(configured_hosts[min(ready, current):])["drained_hosts"])
         cooldown = 0 if self.low_demand_since is None else max(0, self.cooldown_seconds - int(now - self.low_demand_since))
         self.metrics.update(healthy=1, desired=target, queue=issue_count, blocked=blocked_count,
-                            current=current,
+                            current=current, drained=drained_count,
                             cooldown=cooldown, last_error="")
 
     def run_once(self):
@@ -375,6 +467,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
             f'symphony_autoscaler_healthy {metrics["healthy"]}',
             f'symphony_autoscaler_desired_workers {metrics["desired"]}',
             f'symphony_autoscaler_current_workers {metrics["current"]}',
+            f'symphony_autoscaler_drained_workers {metrics["drained"]}',
             f'symphony_autoscaler_runnable_issues {metrics["queue"]}',
             f'symphony_autoscaler_blocked_issues {metrics["blocked"]}',
             f'symphony_autoscaler_idle {int(metrics["queue"] == 0)}',
