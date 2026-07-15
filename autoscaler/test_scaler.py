@@ -2,7 +2,7 @@ import unittest
 import os
 import tempfile
 from unittest import mock
-from scaler import Scaler, UsageLedger, desired_workers, stable_session_id
+from scaler import Scaler, UsageLedger, desired_workers, issue_is_runnable, stable_session_id
 
 
 class UsageLedgerTest(unittest.TestCase):
@@ -185,6 +185,82 @@ class DesiredWorkersTest(unittest.TestCase):
         self.assertEqual(desired_workers(8, agents_per_worker=2, minimum=1, maximum=3), 3)
 
 
+class RunnableIssueTest(unittest.TestCase):
+    def test_active_work_is_runnable_even_if_a_blocker_relation_remains(self):
+        issue = {"state": {"name": "In Progress"}, "inverseRelations": {
+            "nodes": [{"type": "blocks", "issue": {"state": {"type": "started"}}}],
+            "pageInfo": {"hasNextPage": False},
+        }}
+        self.assertTrue(issue_is_runnable(issue))
+
+    def test_todo_with_unresolved_blocker_is_not_runnable(self):
+        issue = {"state": {"name": "Todo"}, "inverseRelations": {
+            "nodes": [{"type": "blocks", "issue": {"state": {"type": "started"}}}],
+            "pageInfo": {"hasNextPage": False},
+        }}
+        self.assertFalse(issue_is_runnable(issue))
+
+    def test_todo_with_only_terminal_blockers_is_runnable(self):
+        for state_type in ("completed", "canceled"):
+            with self.subTest(state_type=state_type):
+                issue = {"state": {"name": "Todo"}, "inverseRelations": {
+                    "nodes": [{"type": "blocks", "issue": {"state": {"type": state_type}}}],
+                    "pageInfo": {"hasNextPage": False},
+                }}
+                self.assertTrue(issue_is_runnable(issue))
+
+    def test_non_blocking_relations_do_not_hold_todo(self):
+        issue = {"state": {"name": "Todo"}, "inverseRelations": {
+            "nodes": [{"type": "related", "issue": {"state": {"type": "started"}}}],
+            "pageInfo": {"hasNextPage": False},
+        }}
+        self.assertTrue(issue_is_runnable(issue))
+
+    def test_truncated_blocker_list_fails_closed(self):
+        issue = {"state": {"name": "Todo"}, "inverseRelations": {
+            "nodes": [], "pageInfo": {"hasNextPage": True},
+        }}
+        with self.assertRaises(RuntimeError):
+            issue_is_runnable(issue)
+
+    def test_malformed_blocker_payload_fails_closed(self):
+        malformed_issues = (
+            {"state": None},
+            {"state": {"name": "Todo"}, "inverseRelations": None},
+            {"state": {"name": "Todo"}, "inverseRelations": {
+                "nodes": [None], "pageInfo": {"hasNextPage": False}}},
+            {"state": {"name": "Todo"}, "inverseRelations": {
+                "nodes": [{"type": "blocks", "issue": None}],
+                "pageInfo": {"hasNextPage": False}}},
+        )
+        for issue in malformed_issues:
+            with self.subTest(issue=issue), self.assertRaises(ValueError):
+                issue_is_runnable(issue)
+
+    def test_linear_count_excludes_blocked_todo_across_pages(self):
+        scaler = object.__new__(Scaler)
+        scaler.project_slug = "project"
+        scaler.linear_key = "key"
+        pages = iter((
+            {"data": {"issues": {"nodes": [
+                {"state": {"name": "In Progress"}, "inverseRelations": {
+                    "nodes": [], "pageInfo": {"hasNextPage": False}}},
+                {"state": {"name": "Todo"}, "inverseRelations": {
+                    "nodes": [{"type": "blocks", "issue": {"state": {"type": "started"}}}],
+                    "pageInfo": {"hasNextPage": False}}},
+            ], "pageInfo": {"hasNextPage": True, "endCursor": "next"}}}},
+            {"data": {"issues": {"nodes": [
+                {"state": {"name": "Todo"}, "inverseRelations": {
+                    "nodes": [{"type": "blocks", "issue": {"state": {"type": "completed"}}}],
+                    "pageInfo": {"hasNextPage": False}}},
+            ], "pageInfo": {"hasNextPage": False, "endCursor": None}}}},
+        ))
+        scaler.request_json = mock.Mock(side_effect=lambda *_args, **_kwargs: next(pages))
+
+        self.assertEqual(scaler.linear_issue_count(), (2, 1))
+        self.assertEqual(scaler.request_json.call_count, 2)
+
+
 class FakeScaler(Scaler):
     def __init__(self):
         self.clock = 0
@@ -202,13 +278,14 @@ class FakeScaler(Scaler):
         self.fail_symphony = False
         self.fail_kubernetes = False
         self.fail_write = False
-        self.metrics = {"healthy": 0, "desired": 2, "queue": 0, "current": 2,
+        self.metrics = {"healthy": 0, "desired": 2, "queue": 0, "blocked": 0,
+                        "current": 2,
                         "cooldown": 0, "errors": 0, "last_error": "starting"}
 
     def linear_issue_count(self):
         if self.fail:
             raise RuntimeError("unavailable")
-        return self.issues
+        return self.issues, 0
 
     def symphony_busy(self):
         if self.fail_symphony:

@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LINEAR_URL = "https://api.linear.app/graphql"
 RUNNABLE_STATES = ("Todo", "In Progress", "Rework", "Merging")
+TERMINAL_STATE_TYPES = ("completed", "canceled")
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens")
 
 
@@ -194,6 +195,32 @@ def desired_workers(issue_count, agents_per_worker=1, minimum=2, maximum=5):
     return max(minimum, min(maximum, math.ceil(issue_count / agents_per_worker)))
 
 
+def issue_is_runnable(issue):
+    state = issue.get("state")
+    if not isinstance(state, dict) or not isinstance(state.get("name"), str):
+        raise ValueError("invalid Linear issue state")
+    if state["name"] != "Todo":
+        return True
+    blockers = issue.get("inverseRelations")
+    if not isinstance(blockers, dict) or not isinstance(blockers.get("nodes"), list) \
+            or not isinstance(blockers.get("pageInfo"), dict):
+        raise ValueError("invalid Linear blocker relations")
+    if blockers["pageInfo"].get("hasNextPage"):
+        raise RuntimeError("Linear issue has more blockers than the autoscaler query limit")
+    for relation in blockers["nodes"]:
+        if not isinstance(relation, dict) or not isinstance(relation.get("type"), str):
+            raise ValueError("invalid Linear blocker relation")
+        if relation["type"] != "blocks":
+            continue
+        blocker = relation.get("issue")
+        blocker_state = blocker.get("state") if isinstance(blocker, dict) else None
+        if not isinstance(blocker_state, dict) or not isinstance(blocker_state.get("type"), str):
+            raise ValueError("invalid Linear blocker state")
+        if blocker_state["type"] not in TERMINAL_STATE_TYPES:
+            return False
+    return True
+
+
 class Scaler:
     def __init__(self, now=time.monotonic):
         self.now = now
@@ -212,7 +239,8 @@ class Scaler:
         self.ssl_context = ssl.create_default_context(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
         self.low_demand_since = None
         self.usage_ledger = UsageLedger(os.getenv("USAGE_LEDGER_PATH", "/var/lib/symphony-metrics/usage.json"))
-        self.metrics = {"healthy": 0, "desired": self.minimum, "queue": 0, "current": self.minimum,
+        self.metrics = {"healthy": 0, "desired": self.minimum, "queue": 0, "blocked": 0,
+                        "current": self.minimum,
                         "cooldown": 0, "errors": 0, "ledger_errors": 0,
                         "last_error": "starting"}
 
@@ -224,11 +252,19 @@ class Scaler:
     def linear_issue_count(self):
         query = """query AutoscalerIssues($slug: String!, $states: [String!]!, $after: String) {
           issues(first: 100, after: $after, filter: {project: {slugId: {eq: $slug}}, state: {name: {in: $states}}}) {
-            nodes { id }
+            nodes {
+              id
+              state { name }
+              inverseRelations(first: 50) {
+                nodes { type issue { state { type } } }
+                pageInfo { hasNextPage }
+              }
+            }
             pageInfo { hasNextPage endCursor }
           }
         }"""
         count = 0
+        blocked = 0
         after = None
         while True:
             body = json.dumps({"query": query, "variables": {"slug": self.project_slug,
@@ -238,9 +274,13 @@ class Scaler:
             if result.get("errors"):
                 raise RuntimeError("Linear GraphQL request failed")
             page = result["data"]["issues"]
-            count += len(page["nodes"])
+            for issue in page["nodes"]:
+                if issue_is_runnable(issue):
+                    count += 1
+                else:
+                    blocked += 1
             if not page["pageInfo"]["hasNextPage"]:
-                return count
+                return count, blocked
             after = page["pageInfo"]["endCursor"]
 
     def symphony_state(self):
@@ -276,7 +316,7 @@ class Scaler:
                                    "Content-Type": "application/json"}, method="PUT", context=self.ssl_context)
 
     def reconcile(self):
-        issue_count = self.linear_issue_count()
+        issue_count, blocked_count = self.linear_issue_count()
         busy = self.symphony_busy()
         current, resource_version = self.current_workers()
         target = desired_workers(issue_count, self.agents_per_worker, self.minimum, self.maximum)
@@ -297,7 +337,8 @@ class Scaler:
         else:
             self.low_demand_since = None
         cooldown = 0 if self.low_demand_since is None else max(0, self.cooldown_seconds - int(now - self.low_demand_since))
-        self.metrics.update(healthy=1, desired=target, queue=issue_count, current=current,
+        self.metrics.update(healthy=1, desired=target, queue=issue_count, blocked=blocked_count,
+                            current=current,
                             cooldown=cooldown, last_error="")
 
     def run_once(self):
@@ -335,6 +376,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
             f'symphony_autoscaler_desired_workers {metrics["desired"]}',
             f'symphony_autoscaler_current_workers {metrics["current"]}',
             f'symphony_autoscaler_runnable_issues {metrics["queue"]}',
+            f'symphony_autoscaler_blocked_issues {metrics["blocked"]}',
             f'symphony_autoscaler_idle {int(metrics["queue"] == 0)}',
             f'symphony_autoscaler_active_minimum_workers {self.scaler.minimum}',
             f'symphony_autoscaler_scale_down_cooldown_seconds {metrics["cooldown"]}',

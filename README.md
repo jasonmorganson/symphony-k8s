@@ -188,12 +188,15 @@ would add a separate monthly charge.
 ### Demand-based autoscaling
 
 The `symphony-autoscaler` deployment polls Linear and Symphony every 15
-seconds. It counts runnable issues in `Todo`, `In Progress`, `Rework`, and
-`Merging`. Zero issues requests zero workers; active work requests one worker
-for each runnable issue, bounded to two through five workers. Scale-up is
-immediate. Scale-down requires no running or retrying sessions and 20 continuous
-minutes of reduced demand. Observation failures reset the cooldown and retain
-the current capacity.
+seconds. It counts active issues in `In Progress`, `Rework`, and `Merging`, plus
+`Todo` issues that have no unresolved `blocks` relation. Completed or canceled
+blockers do not hold queued work. Zero runnable issues requests zero workers;
+active work requests one worker for each runnable issue, bounded to two through
+five workers. Scale-up is immediate. Scale-down requires no running or retrying
+sessions and 20 continuous minutes of reduced demand. Observation failures,
+including a truncated blocker relation list, reset the cooldown and retain the
+current capacity. The `symphony_autoscaler_blocked_issues` metric reports queued
+issues excluded from demand.
 
 Each worker has strict hostname spreading, so a pending worker makes the DOKS
 Cluster Autoscaler add a node. Configure `symphony-ha` with minimum 0 and

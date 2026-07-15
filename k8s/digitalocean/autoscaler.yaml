@@ -60,7 +60,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: autoscaler
-          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712-zero
+          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260715-blockers
           imagePullPolicy: Always
           env:
             - name: POD_NAMESPACE
