@@ -27,7 +27,7 @@ verify_required_commands() {
 }
 
 configure_github_auth() {
-  local authenticated_login configured_name configured_email
+  local authenticated_login configured_name configured_email gh_hosts_file
 
   trim_secret GITHUB_TOKEN
 
@@ -39,16 +39,25 @@ configure_github_auth() {
   chown symphony:symphony "$SYMPHONY_HOME/.netrc"
   chmod 0600 "$SYMPHONY_HOME/.netrc"
 
-  runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
+  printf '%s' "$GITHUB_TOKEN" | runuser -u symphony -- \
+    env -u GITHUB_TOKEN -u GH_TOKEN HOME="$SYMPHONY_HOME" \
+    gh auth login --hostname github.com --git-protocol https --with-token
+  gh_hosts_file="$SYMPHONY_HOME/.config/gh/hosts.yml"
+  chown symphony:symphony "$gh_hosts_file"
+  chmod 0600 "$gh_hosts_file"
+
+  runuser -u symphony -- env -u GITHUB_TOKEN -u GH_TOKEN HOME="$SYMPHONY_HOME" \
     gh auth status --hostname github.com >/dev/null
-  authenticated_login="$(runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
+  authenticated_login="$(runuser -u symphony -- \
+    env -u GITHUB_TOKEN -u GH_TOKEN HOME="$SYMPHONY_HOME" \
     gh api user --jq .login)"
   if [[ "$authenticated_login" != "$GITHUB_MACHINE_LOGIN" ]]; then
     echo "GitHub credential is not the required Symphony machine identity" >&2
     return 1
   fi
 
-  if ! runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
+  if ! runuser -u symphony -- \
+    env -u GITHUB_TOKEN -u GH_TOKEN HOME="$SYMPHONY_HOME" \
     gh repo view withAutograph/arrusted-development \
       --json nameWithOwner --jq .nameWithOwner >/dev/null; then
     echo "GitHub machine credential cannot access the required repository" >&2
