@@ -64,6 +64,10 @@ assert_machine_identity_result() {
   chmod() { :; }
   runuser() {
     case "$*" in
+      *"gh auth login"*)
+        cat >/dev/null
+        printf '%s\n' 'github.com:' > "$tmp_home/.config/gh/hosts.yml"
+        ;;
       *"gh auth status"*) return 0 ;;
       *"gh api user"*) printf '%s\n' "$login" ;;
       *"gh repo view"*)
@@ -93,10 +97,13 @@ assert_machine_identity_result() {
     fi
   fi
   [[ "$output" != *"$secret"* ]]
-  local netrc_mode
+  local netrc_mode hosts_mode
   netrc_mode="$(stat -c '%a' "$tmp_home/.netrc" 2>/dev/null || \
     stat -f '%Lp' "$tmp_home/.netrc")"
   [[ "$netrc_mode" == 600 ]]
+  hosts_mode="$(stat -c '%a' "$tmp_home/.config/gh/hosts.yml" 2>/dev/null || \
+    stat -f '%Lp' "$tmp_home/.config/gh/hosts.yml")"
+  [[ "$hosts_mode" == 600 ]]
 
   unset -f install chown chmod runuser
   unset GITHUB_TOKEN
@@ -164,6 +171,10 @@ grep -A8 'readinessProbe:' "${worker_manifests[0]}" | grep -q '/run/symphony-wor
 grep -q '^    gh \\' "$ROOT_DIR/docker/worker/Dockerfile"
 grep -q 'gh --version' "$ROOT_DIR/docker/worker/Dockerfile"
 grep -q 'configure_github_auth' "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'gh auth login --hostname github.com --git-protocol https --with-token' \
+  "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'env -u GITHUB_TOKEN -u GH_TOKEN HOME=' \
+  "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'gh auth status --hostname github.com' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'gh api user --jq .login' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'GITHUB_MACHINE_LOGIN="autograph-symphony"' "$ROOT_DIR/docker/worker/entrypoint.sh"
