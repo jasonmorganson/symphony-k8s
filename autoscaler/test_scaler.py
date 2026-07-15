@@ -341,6 +341,43 @@ class WorkerDrainRequestTest(unittest.TestCase):
             scaler.set_worker_drains(["worker-2"])
 
 
+class CurrentWorkersTest(unittest.TestCase):
+    def scaler_with_response(self, response):
+        scaler = Scaler.__new__(Scaler)
+        scaler.token = "token"
+        scaler.ssl_context = object()
+        scaler.request_json = mock.Mock(return_value=response)
+        scaler.scale_url = mock.Mock(return_value="https://kubernetes/scale")
+        return scaler
+
+    def test_reads_desired_replicas_from_spec(self):
+        scaler = self.scaler_with_response({
+            "metadata": {"resourceVersion": "42"},
+            "spec": {"replicas": 2},
+            "status": {"replicas": 1},
+        })
+        self.assertEqual(scaler.current_workers(), (2, "42"))
+
+    def test_reads_zero_replicas_from_status_when_spec_omits_field(self):
+        scaler = self.scaler_with_response({
+            "metadata": {"resourceVersion": "43"},
+            "spec": {},
+            "status": {"replicas": 0, "selector": "app=symphony-worker"},
+        })
+        self.assertEqual(scaler.current_workers(), (0, "43"))
+
+    def test_malformed_scale_responses_fail_closed(self):
+        responses = [
+            {"metadata": {"resourceVersion": "44"}, "spec": {}, "status": {}},
+            {"metadata": {"resourceVersion": "44"}, "spec": {}, "status": {"replicas": "0"}},
+            {"metadata": {"resourceVersion": "44"}, "spec": {}, "status": {"replicas": -1}},
+            {"metadata": {}, "spec": {}, "status": {"replicas": 0}},
+        ]
+        for response in responses:
+            with self.subTest(response=response), self.assertRaises(ValueError):
+                self.scaler_with_response(response).current_workers()
+
+
 class FakeScaler(Scaler):
     def __init__(self):
         self.clock = 0

@@ -350,7 +350,17 @@ class Scaler:
     def current_workers(self):
         scale = self.request_json(self.scale_url(), headers={"Authorization": f"Bearer {self.token}"},
                                   context=self.ssl_context)
-        return int(scale["spec"]["replicas"]), scale["metadata"]["resourceVersion"]
+        spec = scale.get("spec") if isinstance(scale, dict) else None
+        status = scale.get("status") if isinstance(scale, dict) else None
+        metadata = scale.get("metadata") if isinstance(scale, dict) else None
+        if not isinstance(spec, dict) or not isinstance(status, dict) or not isinstance(metadata, dict):
+            raise ValueError("invalid Kubernetes Scale response")
+        replicas = spec.get("replicas") if "replicas" in spec else status.get("replicas")
+        resource_version = metadata.get("resourceVersion")
+        if type(replicas) is not int or replicas < 0 \
+                or not isinstance(resource_version, str) or not resource_version:
+            raise ValueError("invalid Kubernetes Scale response")
+        return replicas, resource_version
 
     def set_workers(self, replicas, resource_version):
         body = json.dumps({"apiVersion": "autoscaling/v1", "kind": "Scale",
