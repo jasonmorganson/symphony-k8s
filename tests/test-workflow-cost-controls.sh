@@ -12,8 +12,10 @@ grep -q 'symphony-worker-4.symphony-worker.symphony.svc.cluster.local' "$runtime
 grep -q '^  root: /srv/symphony/workspaces$' "$runtime"
 grep -q 'model_reasoning_effort=medium' "$runtime"
 grep -q 'agents.max_threads=3' "$runtime"
+grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$runtime"
 grep -q 'workflow_body=.*awk' "$generator"
 grep -q "SYMPHONY_WORKFLOW_FILE" "$generator"
+grep -q 'SYMPHONY_WORKER_DRAIN_TOKEN' "$generator"
 
 if grep -q '^## ' "$runtime"; then
   echo "runtime front matter must not fork canonical behavioral instructions" >&2

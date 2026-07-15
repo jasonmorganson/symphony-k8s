@@ -2,7 +2,8 @@ import unittest
 import os
 import tempfile
 from unittest import mock
-from scaler import Scaler, UsageLedger, desired_workers, issue_is_runnable, stable_session_id
+from scaler import (Scaler, UsageLedger, desired_workers, issue_is_runnable,
+                    stable_session_id, worker_pool_activity)
 
 
 class UsageLedgerTest(unittest.TestCase):
@@ -261,6 +262,85 @@ class RunnableIssueTest(unittest.TestCase):
         self.assertEqual(scaler.request_json.call_count, 2)
 
 
+class WorkerPoolActivityTest(unittest.TestCase):
+    def test_returns_floor_above_highest_running_or_retrying_host(self):
+        state = {
+            "counts": {"running": 1, "retrying": 1},
+            "running": [{"worker_host": "symphony-worker-0"}],
+            "retrying": [{"worker_host": "symphony-worker-2"}],
+            "worker_pool": {
+                "configured_hosts": ["symphony-worker-0", "symphony-worker-1", "symphony-worker-2"],
+                "drained_hosts": [],
+            },
+        }
+        self.assertEqual(worker_pool_activity(state, 3),
+                         (2, 3, ["symphony-worker-0", "symphony-worker-1", "symphony-worker-2"]))
+
+    def test_reordered_or_wrong_statefulset_hosts_fail_closed(self):
+        for configured in (
+                ["symphony-worker-1", "symphony-worker-0"],
+                ["other-worker-0", "other-worker-1"],
+                ["symphony-worker-0.symphony-worker", "symphony-worker-2.symphony-worker"]):
+            state = {
+                "counts": {"running": 0, "retrying": 0},
+                "running": [], "retrying": [],
+                "worker_pool": {"configured_hosts": configured, "drained_hosts": []},
+            }
+            with self.subTest(configured=configured), self.assertRaises(ValueError):
+                worker_pool_activity(state, 2)
+
+    def test_fqdn_hosts_preserve_statefulset_ordinal_mapping(self):
+        hosts = [f"symphony-worker-{index}.symphony-worker.symphony.svc" for index in range(2)]
+        state = {
+            "counts": {"running": 1, "retrying": 0},
+            "running": [{"worker_host": hosts[1]}], "retrying": [],
+            "worker_pool": {"configured_hosts": hosts, "drained_hosts": []},
+        }
+        self.assertEqual(worker_pool_activity(state, 2), (1, 2, hosts))
+
+    def test_unknown_placement_and_malformed_pool_fail_closed(self):
+        states = [
+            {
+                "counts": {"running": 1, "retrying": 0},
+                "running": [{"worker_host": "symphony-worker-9"}],
+                "retrying": [],
+                "worker_pool": {"configured_hosts": ["symphony-worker-0"], "drained_hosts": []},
+            },
+            {
+                "counts": {"running": 0, "retrying": 0},
+                "running": [],
+                "retrying": [],
+                "worker_pool": {"configured_hosts": [{"bad": "host"}], "drained_hosts": []},
+            },
+        ]
+        for state in states:
+            with self.subTest(state=state), self.assertRaises(ValueError):
+                worker_pool_activity(state, 1)
+
+
+class WorkerDrainRequestTest(unittest.TestCase):
+    def test_uses_bearer_token_and_requires_exact_acknowledgement(self):
+        scaler = Scaler.__new__(Scaler)
+        scaler.symphony_drains_url = "http://symphony/api/v1/worker-drains"
+        scaler.symphony_drain_token = "d" * 32
+        scaler.request_json = mock.Mock(return_value={
+            "drained_hosts": ["worker-2"],
+            "active_drained_hosts": [],
+        })
+
+        self.assertEqual(scaler.set_worker_drains(["worker-2"])["drained_hosts"], ["worker-2"])
+        _, kwargs = scaler.request_json.call_args
+        self.assertEqual(kwargs["method"], "PUT")
+        self.assertEqual(kwargs["headers"]["Authorization"], f"Bearer {'d' * 32}")
+
+        scaler.request_json.return_value = {
+            "drained_hosts": [],
+            "active_drained_hosts": [],
+        }
+        with self.assertRaises(ValueError):
+            scaler.set_worker_drains(["worker-2"])
+
+
 class FakeScaler(Scaler):
     def __init__(self):
         self.clock = 0
@@ -269,9 +349,16 @@ class FakeScaler(Scaler):
         self.maximum = 5
         self.agents_per_worker = 1
         self.cooldown_seconds = 1200
+        self.symphony_drain_token = "d" * 32
         self.low_demand_since = None
         self.issues = 0
         self.busy = 0
+        self.active_hosts = []
+        self.statefulset = "symphony-worker"
+        self.configured_hosts = [f"symphony-worker-{index}" for index in range(5)]
+        self.ready = 2
+        self.drains = []
+        self.drain_race = []
         self.workers = 2
         self.changes = []
         self.fail = False
@@ -279,7 +366,7 @@ class FakeScaler(Scaler):
         self.fail_kubernetes = False
         self.fail_write = False
         self.metrics = {"healthy": 0, "desired": 2, "queue": 0, "blocked": 0,
-                        "current": 2,
+                        "current": 2, "drained": 0,
                         "cooldown": 0, "errors": 0, "last_error": "starting"}
 
     def linear_issue_count(self):
@@ -287,10 +374,16 @@ class FakeScaler(Scaler):
             raise RuntimeError("unavailable")
         return self.issues, 0
 
-    def symphony_busy(self):
+    def symphony_state(self):
         if self.fail_symphony:
             raise RuntimeError("symphony unavailable")
-        return self.busy
+        running = [{"worker_host": host} for host in self.active_hosts]
+        return {
+            "counts": {"running": len(running), "retrying": 0},
+            "running": running,
+            "retrying": [],
+            "worker_pool": {"configured_hosts": self.configured_hosts, "drained_hosts": self.drains},
+        }
 
     def current_workers(self):
         if self.fail_kubernetes:
@@ -304,6 +397,13 @@ class FakeScaler(Scaler):
         self.workers = replicas
         self.changes.append(replicas)
 
+    def ready_workers(self, _configured_hosts, _current_workers):
+        return self.ready
+
+    def set_worker_drains(self, hosts):
+        self.drains = sorted(hosts)
+        return {"drained_hosts": self.drains, "active_drained_hosts": self.drain_race}
+
 
 class ReconcileTest(unittest.TestCase):
     def test_scales_up_immediately(self):
@@ -313,15 +413,38 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(scaler.changes, [5])
         self.assertEqual(scaler.assert_resource_version, "42")
         self.assertEqual(scaler.metrics["healthy"], 1)
+        self.assertEqual(scaler.drains, ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
 
-    def test_scale_down_waits_for_idle_cooldown(self):
+    def test_active_scale_down_drains_then_removes_trailing_idle_workers(self):
         scaler = FakeScaler()
         scaler.workers = 5
-        scaler.issues = 3
-        scaler.busy = 1
+        scaler.ready = 5
+        scaler.issues = 2
+        scaler.active_hosts = ["symphony-worker-0", "symphony-worker-1"]
+        scaler.run_once()
+        self.assertEqual(scaler.drains, ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
+        self.assertEqual(scaler.changes, [2])
+
+    def test_active_high_ordinal_and_drain_race_retain_capacity(self):
+        scaler = FakeScaler()
+        scaler.workers = 5
+        scaler.ready = 5
+        scaler.issues = 2
+        scaler.active_hosts = ["symphony-worker-4"]
         scaler.run_once()
         self.assertEqual(scaler.changes, [])
-        scaler.busy = 0
+        self.assertEqual(scaler.drains, [])
+
+        scaler.active_hosts = ["symphony-worker-0"]
+        scaler.drain_race = ["symphony-worker-3"]
+        scaler.run_once()
+        self.assertEqual(scaler.changes, [])
+
+    def test_idle_scale_down_waits_for_cooldown_then_drains(self):
+        scaler = FakeScaler()
+        scaler.workers = 5
+        scaler.ready = 5
+        scaler.issues = 3
         scaler.run_once()
         scaler.clock = 1199
         scaler.run_once()
@@ -329,6 +452,7 @@ class ReconcileTest(unittest.TestCase):
         scaler.clock = 1200
         scaler.run_once()
         self.assertEqual(scaler.changes, [3])
+        self.assertEqual(scaler.drains, ["symphony-worker-3", "symphony-worker-4"])
 
     def test_zero_demand_scales_to_zero_after_idle_cooldown(self):
         scaler = FakeScaler()
@@ -348,6 +472,46 @@ class ReconcileTest(unittest.TestCase):
         scaler.issues = 1
         scaler.run_once()
         self.assertEqual(scaler.changes, [2])
+        self.assertEqual(scaler.drains, ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
+
+        scaler.ready = 2
+        scaler.run_once()
+        self.assertEqual(scaler.drains, ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
+
+        scaler.issues = 3
+        scaler.run_once()
+        self.assertEqual(scaler.changes, [2, 3])
+
+        scaler.ready = 3
+        scaler.run_once()
+        self.assertEqual(scaler.drains, ["symphony-worker-3", "symphony-worker-4"])
+
+    def test_scale_up_fences_future_hosts_before_creating_pods(self):
+        scaler = FakeScaler()
+        scaler.workers = 2
+        scaler.ready = 2
+        scaler.issues = 3
+        events = []
+        scaler.set_worker_drains = lambda hosts: (
+            events.append(("drain", list(hosts))) or
+            {"drained_hosts": sorted(hosts), "active_drained_hosts": []})
+        original_set_workers = scaler.set_workers
+        scaler.set_workers = lambda replicas, version: (
+            events.append(("scale", replicas)), original_set_workers(replicas, version))[1]
+        scaler.run_once()
+        self.assertEqual(events, [
+            ("drain", ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"]),
+            ("scale", 3),
+        ])
+
+    def test_scale_up_stops_if_fence_acknowledges_an_active_future_host(self):
+        scaler = FakeScaler()
+        scaler.workers = 2
+        scaler.ready = 2
+        scaler.issues = 3
+        scaler.drain_race = ["symphony-worker-2"]
+        scaler.run_once()
+        self.assertEqual(scaler.changes, [])
 
     def test_failure_retains_capacity_and_recovers(self):
         scaler = FakeScaler()

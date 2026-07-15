@@ -25,6 +25,7 @@ worker:
     - symphony-worker-3.symphony-worker.symphony.svc.cluster.local
     - symphony-worker-4.symphony-worker.symphony.svc.cluster.local
   max_concurrent_agents_per_host: 1
+  drain_state_path: /srv/symphony/workspaces/.worker-drains.json
 hooks:
   after_create: |
     exec /usr/local/bin/bootstrap-arrusted-workspace "$PWD"
