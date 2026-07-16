@@ -3,6 +3,7 @@ import json
 import math
 import os
 import ssl
+import sys
 import tempfile
 import threading
 import time
@@ -258,8 +259,9 @@ def worker_pool_activity(state, current_workers, statefulset="symphony-worker"):
 
 
 class Scaler:
-    def __init__(self, now=time.monotonic):
+    def __init__(self, now=time.monotonic, wall_clock=time.time):
         self.now = now
+        self.wall_clock = wall_clock
         self.namespace = os.getenv("POD_NAMESPACE", "symphony")
         self.statefulset = os.getenv("WORKER_STATEFULSET", "symphony-worker")
         self.project_slug = os.environ["LINEAR_PROJECT_SLUG"]
@@ -280,10 +282,23 @@ class Scaler:
         self.ssl_context = ssl.create_default_context(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
         self.low_demand_since = None
         self.usage_ledger = UsageLedger(os.getenv("USAGE_LEDGER_PATH", "/var/lib/symphony-metrics/usage.json"))
+        self.reconcile_stage = "starting"
+        self.error_counts = {}
         self.metrics = {"healthy": 0, "desired": self.minimum, "queue": 0, "blocked": 0,
                         "current": self.minimum, "drained": 0,
                         "cooldown": 0, "errors": 0, "ledger_errors": 0,
-                        "last_error": "starting"}
+                        "last_error": "", "last_error_stage": "",
+                        "last_error_timestamp": 0, "last_success_timestamp": 0}
+
+    def at_stage(self, stage, function, *args, **kwargs):
+        self.reconcile_stage = stage
+        return function(*args, **kwargs)
+
+    def record_error(self, stage, error_type):
+        counter = (stage, error_type)
+        updated = dict(self.error_counts)
+        updated[counter] = updated.get(counter, 0) + 1
+        self.error_counts = updated
 
     def request_json(self, url, *, data=None, headers=None, method=None, context=None):
         request = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
@@ -393,21 +408,26 @@ class Scaler:
         return ready
 
     def reconcile(self):
-        issue_count, blocked_count = self.linear_issue_count()
-        state = self.symphony_state()
-        current, resource_version = self.current_workers()
-        busy, active_floor, configured_hosts = worker_pool_activity(state, current, self.statefulset)
-        ready = self.ready_workers(configured_hosts, current)
-        target = desired_workers(issue_count, self.agents_per_worker, self.minimum, self.maximum)
+        issue_count, blocked_count = self.at_stage("linear", self.linear_issue_count)
+        state = self.at_stage("symphony_state", self.symphony_state)
+        current, resource_version = self.at_stage("kubernetes_scale_read", self.current_workers)
+        busy, active_floor, configured_hosts = self.at_stage(
+            "state_validation", worker_pool_activity, state, current, self.statefulset)
+        ready = self.at_stage("kubernetes_pods", self.ready_workers, configured_hosts, current)
+        target = self.at_stage(
+            "demand_calculation", desired_workers,
+            issue_count, self.agents_per_worker, self.minimum, self.maximum)
+        self.reconcile_stage = "capacity_validation"
         if target > len(configured_hosts):
             raise ValueError("autoscaler target exceeds configured Symphony worker hosts")
         now = self.now()
         drained_count = 0
         if target > current:
-            acknowledgement = self.set_worker_drains(configured_hosts[ready:])
+            acknowledgement = self.at_stage(
+                "symphony_drains", self.set_worker_drains, configured_hosts[ready:])
             drained_count = len(acknowledgement["drained_hosts"])
             if not acknowledgement["active_drained_hosts"]:
-                self.set_workers(target, resource_version)
+                self.at_stage("kubernetes_scale_write", self.set_workers, target, resource_version)
                 current = target
                 self.low_demand_since = None
         elif target < current:
@@ -415,41 +435,101 @@ class Scaler:
                 self.low_demand_since = None
                 safe_target = max(target, active_floor)
                 if safe_target < current:
-                    acknowledgement = self.set_worker_drains(configured_hosts[safe_target:])
+                    acknowledgement = self.at_stage(
+                        "symphony_drains", self.set_worker_drains,
+                        configured_hosts[safe_target:])
                     drained_count = len(acknowledgement["drained_hosts"])
                     if not acknowledgement["active_drained_hosts"]:
-                        self.set_workers(safe_target, resource_version)
+                        self.at_stage(
+                            "kubernetes_scale_write", self.set_workers,
+                            safe_target, resource_version)
                         current = safe_target
                 else:
-                    drained_count = len(self.set_worker_drains(configured_hosts[current:])["drained_hosts"])
+                    drained_count = len(self.at_stage(
+                        "symphony_drains", self.set_worker_drains,
+                        configured_hosts[current:])["drained_hosts"])
             elif self.low_demand_since is None:
                 self.low_demand_since = now
-                drained_count = len(self.set_worker_drains(configured_hosts[current:])["drained_hosts"])
+                drained_count = len(self.at_stage(
+                    "symphony_drains", self.set_worker_drains,
+                    configured_hosts[current:])["drained_hosts"])
             elif now - self.low_demand_since >= self.cooldown_seconds:
-                acknowledgement = self.set_worker_drains(configured_hosts[target:])
+                acknowledgement = self.at_stage(
+                    "symphony_drains", self.set_worker_drains, configured_hosts[target:])
                 drained_count = len(acknowledgement["drained_hosts"])
                 if not acknowledgement["active_drained_hosts"]:
-                    self.set_workers(target, resource_version)
+                    self.at_stage(
+                        "kubernetes_scale_write", self.set_workers, target, resource_version)
                     current = target
                     self.low_demand_since = None
             else:
-                drained_count = len(self.set_worker_drains(configured_hosts[current:])["drained_hosts"])
+                drained_count = len(self.at_stage(
+                    "symphony_drains", self.set_worker_drains,
+                    configured_hosts[current:])["drained_hosts"])
         else:
             self.low_demand_since = None
-            drained_count = len(
-                self.set_worker_drains(configured_hosts[min(ready, current):])["drained_hosts"])
+            drained_count = len(self.at_stage(
+                "symphony_drains", self.set_worker_drains,
+                configured_hosts[min(ready, current):])["drained_hosts"])
         cooldown = 0 if self.low_demand_since is None else max(0, self.cooldown_seconds - int(now - self.low_demand_since))
         self.metrics.update(healthy=1, desired=target, queue=issue_count, blocked=blocked_count,
                             current=current, drained=drained_count,
-                            cooldown=cooldown, last_error="")
+                            cooldown=cooldown)
 
     def run_once(self):
         try:
             self.reconcile()
+            self.metrics["last_success_timestamp"] = int(self.wall_clock())
         except (KeyError, OSError, RuntimeError, ValueError, urllib.error.URLError) as error:
             self.low_demand_since = None
+            error_type = type(error).__name__
+            timestamp = int(self.wall_clock())
+            self.record_error(self.reconcile_stage, error_type)
             self.metrics.update(healthy=0, errors=self.metrics["errors"] + 1,
-                                last_error=type(error).__name__)
+                                last_error=error_type,
+                                last_error_stage=self.reconcile_stage,
+                                last_error_timestamp=timestamp)
+            print(json.dumps({
+                "event": "autoscaler_reconcile_failed",
+                "stage": self.reconcile_stage,
+                "error_type": error_type,
+                "error": str(error),
+                "timestamp": timestamp,
+            }, sort_keys=True), file=sys.stderr, flush=True)
+
+
+def metrics_lines(scaler):
+    metrics = dict(scaler.metrics)
+    lines = [
+        f'symphony_autoscaler_healthy {metrics["healthy"]}',
+        f'symphony_autoscaler_desired_workers {metrics["desired"]}',
+        f'symphony_autoscaler_current_workers {metrics["current"]}',
+        f'symphony_autoscaler_drained_workers {metrics["drained"]}',
+        f'symphony_autoscaler_runnable_issues {metrics["queue"]}',
+        f'symphony_autoscaler_blocked_issues {metrics["blocked"]}',
+        f'symphony_autoscaler_idle {int(metrics["queue"] == 0)}',
+        f'symphony_autoscaler_active_minimum_workers {scaler.minimum}',
+        f'symphony_autoscaler_scale_down_cooldown_seconds {metrics["cooldown"]}',
+        f'symphony_autoscaler_errors_total {metrics["errors"]}',
+        f'symphony_usage_ledger_errors_total {metrics["ledger_errors"] + scaler.usage_ledger.load_errors}',
+        f'symphony_autoscaler_last_error_timestamp_seconds {metrics["last_error_timestamp"]}',
+        f'symphony_autoscaler_last_success_timestamp_seconds {metrics["last_success_timestamp"]}',
+    ]
+    if metrics["last_error"]:
+        lines.extend([
+            f'symphony_autoscaler_last_error{{type="{metrics["last_error"]}"}} 1',
+            f'symphony_autoscaler_last_error_info{{stage="{metrics["last_error_stage"]}",type="{metrics["last_error"]}"}} 1',
+        ])
+    error_counts = scaler.error_counts
+    for (stage, error_type), count in sorted(error_counts.items()):
+        lines.append(
+            f'symphony_autoscaler_reconcile_errors_total{{stage="{stage}",type="{error_type}"}} {count}')
+    ledger = scaler.usage_ledger.snapshot()
+    lines.append(f'symphony_usage_ledger_sessions {len(ledger["sessions"])}')
+    lines.append(f'symphony_usage_ledger_issues {len(ledger["issues"])}')
+    for field in TOKEN_FIELDS:
+        lines.append(f'symphony_usage_ledger_{field} {sum(issue[field] for issue in ledger["issues"].values())}')
+    return lines
 
 
 class MetricsHandler(BaseHTTPRequestHandler):
@@ -472,27 +552,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
         if self.path != "/metrics":
             self.send_error(404)
             return
-        metrics = self.scaler.metrics
-        lines = [
-            f'symphony_autoscaler_healthy {metrics["healthy"]}',
-            f'symphony_autoscaler_desired_workers {metrics["desired"]}',
-            f'symphony_autoscaler_current_workers {metrics["current"]}',
-            f'symphony_autoscaler_drained_workers {metrics["drained"]}',
-            f'symphony_autoscaler_runnable_issues {metrics["queue"]}',
-            f'symphony_autoscaler_blocked_issues {metrics["blocked"]}',
-            f'symphony_autoscaler_idle {int(metrics["queue"] == 0)}',
-            f'symphony_autoscaler_active_minimum_workers {self.scaler.minimum}',
-            f'symphony_autoscaler_scale_down_cooldown_seconds {metrics["cooldown"]}',
-            f'symphony_autoscaler_errors_total {metrics["errors"]}',
-            f'symphony_usage_ledger_errors_total {metrics["ledger_errors"] + self.scaler.usage_ledger.load_errors}',
-            f'symphony_autoscaler_last_error{{type="{metrics["last_error"]}"}} 1',
-        ]
-        ledger = self.scaler.usage_ledger.snapshot()
-        lines.append(f'symphony_usage_ledger_sessions {len(ledger["sessions"])}')
-        lines.append(f'symphony_usage_ledger_issues {len(ledger["issues"])}')
-        for field in TOKEN_FIELDS:
-            lines.append(f'symphony_usage_ledger_{field} {sum(issue[field] for issue in ledger["issues"].values())}')
-        body = ("\n".join(lines) + "\n").encode()
+        body = ("\n".join(metrics_lines(self.scaler)) + "\n").encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; version=0.0.4")
         self.send_header("Content-Length", str(len(body)))

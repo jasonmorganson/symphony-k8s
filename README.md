@@ -200,7 +200,11 @@ atomically drains trailing scheduler hosts, then removes only replicas above the
 highest running or retrying worker. Fully idle scale-down retains the 20-minute
 cooldown. Observation, drain, or Kubernetes failures reset the cooldown and
 retain capacity. The `symphony_autoscaler_blocked_issues` metric reports queued
-issues excluded from demand.
+issues excluded from demand. Reconcile failures emit one structured JSON log
+record and remain available through last-error stage/type/timestamp metrics
+after recovery. The aggregate error counter remains available for alerts,
+while `symphony_autoscaler_reconcile_errors_total` attributes failures by stage
+and exception type.
 
 Each worker has strict hostname spreading, so a pending worker makes the DOKS
 Cluster Autoscaler add a node. Configure `symphony-ha` with minimum 0 and
@@ -383,13 +387,20 @@ docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712
 ```
 
 With `kubectl` configured for the DOKS cluster, generate the ignored inputs and
-deploy the overlay:
+run the deployment wrapper:
 
 ```bash
 bash scripts/generate-skaffold-inputs.sh
-kubectl apply -k k8s/digitalocean
+bash scripts/deploy-digitalocean.sh
 rm -rf k8s/base/generated
 ```
+
+The wrapper preflights the required DOKS add-ons, applies the Symphony overlay,
+then idempotently pins CoreDNS and konnectivity plus any enabled Hubble relay/UI
+deployments to the fixed `symphony-system` pool with its required taint
+toleration. Run the wrapper after every DOKS upgrade as well as every Symphony
+deployment so provider-managed add-on changes cannot leave critical replicas
+stranded on an autoscaled worker node and block scale-to-zero.
 
 Never commit or retain `k8s/base/generated`: it temporarily contains plaintext
 secret inputs. Remove the generated directory immediately after the Kubernetes
