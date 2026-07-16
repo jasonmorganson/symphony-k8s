@@ -1,8 +1,11 @@
-import unittest
+import io
+import json
 import os
 import tempfile
+import unittest
+from contextlib import redirect_stderr
 from unittest import mock
-from scaler import (Scaler, UsageLedger, desired_workers, issue_is_runnable,
+from scaler import (Scaler, UsageLedger, desired_workers, issue_is_runnable, metrics_lines,
                     stable_session_id, worker_pool_activity)
 
 
@@ -382,6 +385,7 @@ class FakeScaler(Scaler):
     def __init__(self):
         self.clock = 0
         self.now = lambda: self.clock
+        self.wall_clock = lambda: self.clock + 1000
         self.minimum = 2
         self.maximum = 5
         self.agents_per_worker = 1
@@ -402,9 +406,16 @@ class FakeScaler(Scaler):
         self.fail_symphony = False
         self.fail_kubernetes = False
         self.fail_write = False
+        self.reconcile_stage = "starting"
+        self.error_counts = {}
+        self.usage_ledger = mock.Mock(load_errors=0)
+        self.usage_ledger.snapshot.return_value = {"sessions": {}, "issues": {}}
         self.metrics = {"healthy": 0, "desired": 2, "queue": 0, "blocked": 0,
                         "current": 2, "drained": 0,
-                        "cooldown": 0, "errors": 0, "last_error": "starting"}
+                        "cooldown": 0, "errors": 0, "ledger_errors": 0,
+                        "last_error": "",
+                        "last_error_stage": "", "last_error_timestamp": 0,
+                        "last_success_timestamp": 0}
 
     def linear_issue_count(self):
         if self.fail:
@@ -554,13 +565,71 @@ class ReconcileTest(unittest.TestCase):
         scaler = FakeScaler()
         scaler.workers = 4
         scaler.fail = True
-        scaler.run_once()
+        output = io.StringIO()
+        with redirect_stderr(output):
+            scaler.run_once()
         self.assertEqual(scaler.workers, 4)
         self.assertEqual(scaler.metrics["healthy"], 0)
+        self.assertEqual(scaler.metrics["last_error"], "RuntimeError")
+        self.assertEqual(scaler.metrics["last_error_stage"], "linear")
+        self.assertEqual(scaler.metrics["last_error_timestamp"], 1000)
+        self.assertEqual(scaler.error_counts, {("linear", "RuntimeError"): 1})
+        self.assertEqual(json.loads(output.getvalue()), {
+            "error": "unavailable",
+            "error_type": "RuntimeError",
+            "event": "autoscaler_reconcile_failed",
+            "stage": "linear",
+            "timestamp": 1000,
+        })
         scaler.fail = False
         scaler.issues = 12
+        scaler.clock = 5
         scaler.run_once()
         self.assertEqual(scaler.metrics["healthy"], 1)
+        self.assertEqual(scaler.metrics["last_success_timestamp"], 1005)
+        self.assertEqual(scaler.metrics["last_error"], "RuntimeError")
+        self.assertEqual(scaler.metrics["last_error_stage"], "linear")
+
+    def test_failures_are_counted_by_reconcile_stage_and_type(self):
+        scaler = FakeScaler()
+        scenarios = (
+            ("fail_symphony", "symphony_state"),
+            ("fail_kubernetes", "kubernetes_scale_read"),
+            ("fail_write", "kubernetes_scale_write"),
+        )
+        for attribute, stage in scenarios:
+            setattr(scaler, attribute, True)
+            scaler.issues = 15 if attribute == "fail_write" else 0
+            with redirect_stderr(io.StringIO()):
+                scaler.run_once()
+            setattr(scaler, attribute, False)
+            self.assertEqual(scaler.metrics["last_error_stage"], stage)
+            self.assertEqual(scaler.error_counts[(stage, "RuntimeError")], 1)
+        self.assertEqual(scaler.metrics["errors"], 3)
+
+    def test_metrics_exposition_retains_typed_failure_after_recovery(self):
+        scaler = FakeScaler()
+        startup = "\n".join(metrics_lines(scaler))
+        self.assertNotIn("symphony_autoscaler_last_error{", startup)
+        self.assertIn("symphony_autoscaler_last_error_timestamp_seconds 0", startup)
+
+        scaler.fail = True
+        with redirect_stderr(io.StringIO()):
+            scaler.run_once()
+        scaler.fail = False
+        scaler.clock = 5
+        scaler.run_once()
+
+        recovered = "\n".join(metrics_lines(scaler))
+        self.assertIn('symphony_autoscaler_last_error{type="RuntimeError"} 1', recovered)
+        self.assertIn(
+            'symphony_autoscaler_last_error_info{stage="linear",type="RuntimeError"} 1',
+            recovered)
+        self.assertIn(
+            'symphony_autoscaler_reconcile_errors_total{stage="linear",type="RuntimeError"} 1',
+            recovered)
+        self.assertIn("symphony_autoscaler_last_error_timestamp_seconds 1000", recovered)
+        self.assertIn("symphony_autoscaler_last_success_timestamp_seconds 1005", recovered)
 
     def test_symphony_failure_resets_scale_down_cooldown(self):
         scaler = FakeScaler()

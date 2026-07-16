@@ -9,6 +9,7 @@ on:
       - autoscaler/**
       - docker/worker/**
       - k8s/**
+      - scripts/deploy-digitalocean.sh
       - tests/**
       - .github/workflows/publish-images.yml
 
@@ -34,6 +35,8 @@ jobs:
         run: bash tests/test-workspace-bootstrap.sh
       - name: Test workflow cost controls
         run: bash tests/test-workflow-cost-controls.sh
+      - name: Test DOKS deployment hardening
+        run: bash tests/test-doks-deploy.sh
       - name: Build images
         run: |
           docker build -t symphony-runtime-base:do -f docker/runtime-base/Dockerfile .
