@@ -180,7 +180,7 @@ class UsageLedgerTest(unittest.TestCase):
 
 class DesiredWorkersTest(unittest.TestCase):
     def test_capacity_bands(self):
-        cases = {0: 0, 1: 2, 2: 2, 3: 3, 4: 4, 5: 5, 99: 5}
+        cases = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 99: 5}
         for issues, expected in cases.items():
             with self.subTest(issues=issues):
                 self.assertEqual(desired_workers(issues), expected)
@@ -386,7 +386,7 @@ class FakeScaler(Scaler):
         self.clock = 0
         self.now = lambda: self.clock
         self.wall_clock = lambda: self.clock + 1000
-        self.minimum = 2
+        self.minimum = 1
         self.maximum = 5
         self.agents_per_worker = 1
         self.cooldown_seconds = 1200
@@ -473,6 +473,28 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(scaler.drains, ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
         self.assertEqual(scaler.changes, [2])
 
+    def test_single_issue_retains_active_worker_zero_and_removes_worker_one(self):
+        scaler = FakeScaler()
+        scaler.workers = 2
+        scaler.ready = 1
+        scaler.issues = 1
+        scaler.active_hosts = ["symphony-worker-0"]
+        scaler.run_once()
+        self.assertEqual(scaler.drains, [
+            "symphony-worker-1", "symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
+        self.assertEqual(scaler.changes, [1])
+
+    def test_single_issue_retains_active_worker_one(self):
+        scaler = FakeScaler()
+        scaler.workers = 2
+        scaler.ready = 2
+        scaler.issues = 1
+        scaler.active_hosts = ["symphony-worker-1"]
+        scaler.run_once()
+        self.assertEqual(scaler.drains, [
+            "symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
+        self.assertEqual(scaler.changes, [])
+
     def test_active_high_ordinal_and_drain_race_retain_capacity(self):
         scaler = FakeScaler()
         scaler.workers = 5
@@ -514,21 +536,25 @@ class ReconcileTest(unittest.TestCase):
         scaler.run_once()
         self.assertEqual(scaler.changes, [0])
 
-    def test_new_work_wakes_two_workers_immediately(self):
+    def test_new_work_wakes_one_worker_immediately(self):
         scaler = FakeScaler()
         scaler.workers = 0
+        scaler.ready = 0
         scaler.issues = 1
         scaler.run_once()
-        self.assertEqual(scaler.changes, [2])
-        self.assertEqual(scaler.drains, ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
+        self.assertEqual(scaler.changes, [1])
+        self.assertEqual(scaler.drains, [
+            "symphony-worker-0", "symphony-worker-1", "symphony-worker-2",
+            "symphony-worker-3", "symphony-worker-4"])
 
-        scaler.ready = 2
+        scaler.ready = 1
         scaler.run_once()
-        self.assertEqual(scaler.drains, ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
+        self.assertEqual(scaler.drains, [
+            "symphony-worker-1", "symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
 
         scaler.issues = 3
         scaler.run_once()
-        self.assertEqual(scaler.changes, [2, 3])
+        self.assertEqual(scaler.changes, [1, 3])
 
         scaler.ready = 3
         scaler.run_once()

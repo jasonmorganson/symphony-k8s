@@ -193,7 +193,7 @@ The `symphony-autoscaler` deployment polls Linear and Symphony every 15
 seconds. It counts active issues in `In Progress`, `Rework`, and `Merging`, plus
 `Todo` issues that have no unresolved `blocks` relation. Completed or canceled
 blockers do not hold queued work. Zero runnable issues requests zero workers;
-active work requests one worker for each runnable issue, bounded to two through
+active work requests one worker for each runnable issue, bounded to one through
 five workers. Scale-up creates replicas immediately and exposes each worker to
 Symphony only after its pod is ready. While work is active, scale-down first
 atomically drains trailing scheduler hosts, then removes only replicas above the
