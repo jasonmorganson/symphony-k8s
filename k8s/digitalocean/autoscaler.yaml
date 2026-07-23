@@ -144,6 +144,7 @@ spec:
         - name: workflow
           configMap:
             name: symphony-workflow
+            optional: true
             items:
               - key: requester-policy.json
                 path: requester-policy.json
