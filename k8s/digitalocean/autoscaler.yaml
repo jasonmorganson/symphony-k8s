@@ -67,6 +67,22 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: LINEAR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: symphony-secrets
+                  key: LINEAR_API_KEY
+            - name: LINEAR_PROJECT_SLUG
+              value: arrusted-development-71c3d9986f6d
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-machine-arrusted-symphony
+                  key: token
+            - name: REQUESTER_POLICY_PATH
+              value: /etc/symphony-workflow/requester-policy.json
+            - name: APPROVAL_HANDOFF_RETRY_SECONDS
+              value: "300"
             - name: SYMPHONY_WORKER_DRAIN_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -110,6 +126,9 @@ spec:
           volumeMounts:
             - name: usage-ledger
               mountPath: /var/lib/symphony-metrics
+            - name: workflow
+              mountPath: /etc/symphony-workflow
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -122,6 +141,12 @@ spec:
         - name: usage-ledger
           persistentVolumeClaim:
             claimName: symphony-usage-ledger
+        - name: workflow
+          configMap:
+            name: symphony-workflow
+            items:
+              - key: requester-policy.json
+                path: requester-policy.json
 ---
 apiVersion: v1
 kind: Service
