@@ -26,7 +26,7 @@ grep -q 'workflow-source.json=generated/skaffold/workflow/workflow-source.json' 
 grep -A4 'name: GITHUB_TOKEN' "$autoscaler" | grep -q 'name: github-machine-arrusted-symphony'
 grep -A2 'name: REQUESTER_POLICY_PATH' "$autoscaler" | \
   grep -q '/etc/symphony-workflow/requester-policy.json'
-grep -A1 'name: POLL_INTERVAL_SECONDS' "$autoscaler" | grep -q 'value: "15"'
+grep -A1 'name: POLL_INTERVAL_SECONDS' "$autoscaler" | grep -q 'value: "60"'
 grep -A5 'name: workflow$' "$autoscaler" | grep -q 'requester-policy.json'
 if grep -A8 '^  active_states:' "$runtime" | grep -q 'In Review'; then
   echo "In Review must remain passive and absent from tracker.active_states" >&2

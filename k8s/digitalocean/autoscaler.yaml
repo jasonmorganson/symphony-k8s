@@ -60,7 +60,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: autoscaler
-          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:421cde7a4b697af6494001d6fb3823de5f66f12b13c5dfe60808424620f3acb0
+          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:06665383e8ad8bf2c83af0233a222c654698fadd74935fe1d35e4f559c101200
           imagePullPolicy: Always
           env:
             - name: POD_NAMESPACE
@@ -93,11 +93,11 @@ spec:
             - name: AGENTS_PER_WORKER
               value: "1"
             - name: POLL_INTERVAL_SECONDS
-              value: "15"
-            - name: LINEAR_RATE_LIMIT_COOLDOWN_SECONDS
               value: "60"
             - name: SCALE_DOWN_COOLDOWN_SECONDS
               value: "1200"
+            - name: TRACKER_DEMAND_MAX_AGE_SECONDS
+              value: "300"
             - name: USAGE_LEDGER_PATH
               value: /var/lib/symphony-metrics/usage.json
           ports:

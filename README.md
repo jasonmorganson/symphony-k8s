@@ -196,10 +196,11 @@ would add a separate monthly charge.
 
 ### Demand-based autoscaling
 
-The `symphony-autoscaler` deployment polls Linear and Symphony every 15
-seconds. It counts active issues in `In Progress`, `Rework`, and `Merging`, plus
-`Todo` issues that have no unresolved `blocks` relation. Completed or canceled
-blockers do not hold queued work. Zero runnable issues requests zero workers;
+The `symphony-autoscaler` polls every 60 seconds. Capacity uses the
+orchestrator's cached tracker observation and makes no independent Linear
+request. Symphony counts routable active issues, including required-label and
+assignee rules, and reports blocked candidates separately. Zero runnable issues
+requests zero workers;
 active work requests one worker for each runnable issue, bounded to one through
 five workers. Scale-up creates replicas immediately and exposes each worker to
 Symphony only after its pod is ready. While work is active, scale-down first
@@ -316,10 +317,12 @@ printf '%s' "$GITHUB_MACHINE_TOKEN" | \
 unset GITHUB_MACHINE_TOKEN
 ```
 
-The token is mounted only as a worker environment value. Ephemeral `.netrc`,
-GitHub CLI, and Git identity configuration are recreated on every pod start;
-they are not stored in workspace or Codex-home PVCs. A missing, expired,
-wrong-user, or repository-inaccessible credential leaves the worker unready.
+The token is mounted as a worker environment value and as the autoscaler's
+approval-handoff credential. Ephemeral `.netrc`, GitHub CLI, and Git identity
+configuration are recreated on every worker pod start; they are not stored in
+workspace or Codex-home PVCs. A missing, expired, wrong-user, or
+repository-inaccessible credential leaves the worker unready and the handoff
+fail-closed.
 Vercel's native Git integration remains the deployment path; this repository
 does not add a GitHub Actions Vercel deployment.
 
@@ -342,7 +345,7 @@ input tokens and 88 thousand output tokens; the later live total reached 68.9
 million input tokens. One issue consumed about 7.6 million input tokens across
 four agent turns. The optimized workflow uses medium rather than xhigh reasoning,
 permits one agent per worker and one merge at a time,
-polls every 15 seconds, and does not dispatch agents for `Human Review`.
+polls every 60 seconds, and does not dispatch agents for passive `In Review`.
 It also bounds the Linear workpad and consolidates asynchronous review findings
 before a full-repository gate on the final code-bearing tree, avoiding repeated
 context resubmission and full validation for each overlapping review comment.

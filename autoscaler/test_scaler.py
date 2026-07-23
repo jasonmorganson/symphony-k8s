@@ -4,10 +4,11 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr
+from datetime import datetime, timezone
 from unittest import mock
-from scaler import (ApprovalHandoff, Scaler, UsageLedger, desired_workers, issue_is_runnable,
+from scaler import (ApprovalHandoff, Scaler, UsageLedger, desired_workers,
                     load_requester_policy, metrics_lines, requester_approval_is_current,
-                    stable_session_id, worker_pool_activity)
+                    stable_session_id, tracker_demand, worker_pool_activity)
 
 
 def requester_policy():
@@ -234,128 +235,73 @@ class DesiredWorkersTest(unittest.TestCase):
         self.assertEqual(desired_workers(8, agents_per_worker=2, minimum=1, maximum=3), 3)
 
 
-class RunnableIssueTest(unittest.TestCase):
-    def test_active_work_is_runnable_even_if_a_blocker_relation_remains(self):
-        issue = {"state": {"name": "In Progress"}, "inverseRelations": {
-            "nodes": [{"type": "blocks", "issue": {"state": {"type": "started"}}}],
-            "pageInfo": {"hasNextPage": False},
-        }}
-        self.assertTrue(issue_is_runnable(issue))
+class TrackerDemandTest(unittest.TestCase):
+    def test_reads_runnable_and_blocked_counts_from_symphony_state(self):
+        state = {
+            "tracker": {
+                "runnable_issues": 3,
+                "blocked_issues": 2,
+                "observed_at": "2026-07-23T17:00:00Z",
+            },
+        }
+        self.assertEqual(tracker_demand(state), (3, 2))
 
-    def test_todo_with_unresolved_blocker_is_not_runnable(self):
-        issue = {"state": {"name": "Todo"}, "inverseRelations": {
-            "nodes": [{"type": "blocks", "issue": {"state": {"type": "started"}}}],
-            "pageInfo": {"hasNextPage": False},
-        }}
-        self.assertFalse(issue_is_runnable(issue))
-
-    def test_todo_with_only_terminal_blockers_is_runnable(self):
-        for state_type in ("completed", "canceled"):
-            with self.subTest(state_type=state_type):
-                issue = {"state": {"name": "Todo"}, "inverseRelations": {
-                    "nodes": [{"type": "blocks", "issue": {"state": {"type": state_type}}}],
-                    "pageInfo": {"hasNextPage": False},
-                }}
-                self.assertTrue(issue_is_runnable(issue))
-
-    def test_non_blocking_relations_do_not_hold_todo(self):
-        issue = {"state": {"name": "Todo"}, "inverseRelations": {
-            "nodes": [{"type": "related", "issue": {"state": {"type": "started"}}}],
-            "pageInfo": {"hasNextPage": False},
-        }}
-        self.assertTrue(issue_is_runnable(issue))
-
-    def test_truncated_blocker_list_fails_closed(self):
-        issue = {"state": {"name": "Todo"}, "inverseRelations": {
-            "nodes": [], "pageInfo": {"hasNextPage": True},
-        }}
-        with self.assertRaises(RuntimeError):
-            issue_is_runnable(issue)
-
-    def test_malformed_blocker_payload_fails_closed(self):
-        malformed_issues = (
-            {"state": None},
-            {"state": {"name": "Todo"}, "inverseRelations": None},
-            {"state": {"name": "Todo"}, "inverseRelations": {
-                "nodes": [None], "pageInfo": {"hasNextPage": False}}},
-            {"state": {"name": "Todo"}, "inverseRelations": {
-                "nodes": [{"type": "blocks", "issue": None}],
-                "pageInfo": {"hasNextPage": False}}},
+    def test_missing_or_malformed_tracker_observation_fails_closed(self):
+        malformed = (
+            {},
+            {"tracker": None},
+            {"tracker": {"runnable_issues": 1, "blocked_issues": 0}},
+            {"tracker": {
+                "runnable_issues": True,
+                "blocked_issues": 0,
+                "observed_at": "2026-07-23T17:00:00Z",
+            }},
+            {"tracker": {
+                "runnable_issues": 1,
+                "blocked_issues": -1,
+                "observed_at": "2026-07-23T17:00:00Z",
+            }},
+            {"tracker": {
+                "runnable_issues": 1,
+                "blocked_issues": 0,
+                "observed_at": "garbage",
+            }},
         )
-        for issue in malformed_issues:
-            with self.subTest(issue=issue), self.assertRaises(ValueError):
-                issue_is_runnable(issue)
+        for state in malformed:
+            with self.subTest(state=state), self.assertRaises(ValueError):
+                tracker_demand(state)
 
-    def test_linear_count_excludes_blocked_todo_across_pages(self):
-        scaler = object.__new__(Scaler)
-        scaler.project_slug = "project"
-        scaler.linear_key = "key"
-        scaler.now = lambda: 0
-        scaler.linear_rate_limit_cooldown_seconds = 60
-        scaler.linear_cooldown_until = 0
-        scaler.last_linear_counts = None
-        pages = iter((
-            {"data": {"issues": {"nodes": [
-                {"state": {"name": "In Progress"}, "inverseRelations": {
-                    "nodes": [], "pageInfo": {"hasNextPage": False}}},
-                {"state": {"name": "Todo"}, "inverseRelations": {
-                    "nodes": [{"type": "blocks", "issue": {"state": {"type": "started"}}}],
-                    "pageInfo": {"hasNextPage": False}}},
-            ], "pageInfo": {"hasNextPage": True, "endCursor": "next"}}}},
-            {"data": {"issues": {"nodes": [
-                {"state": {"name": "Todo"}, "inverseRelations": {
-                    "nodes": [{"type": "blocks", "issue": {"state": {"type": "completed"}}}],
-                    "pageInfo": {"hasNextPage": False}}},
-            ], "pageInfo": {"hasNextPage": False, "endCursor": None}}}},
-        ))
-        scaler.request_json = mock.Mock(side_effect=lambda *_args, **_kwargs: next(pages))
+    def test_rejects_stale_or_future_observations(self):
+        for observed_at in ("2026-07-23T16:50:00Z", "2026-07-23T17:01:00Z"):
+            state = {"tracker": {
+                "runnable_issues": 1,
+                "blocked_issues": 0,
+                "observed_at": observed_at,
+            }}
+            with self.subTest(observed_at=observed_at), self.assertRaisesRegex(
+                    ValueError, "stale Symphony tracker demand"):
+                tracker_demand(
+                    state,
+                    now=datetime.fromisoformat("2026-07-23T17:00:00+00:00").timestamp(),
+                    maximum_age_seconds=300)
 
-        self.assertEqual(scaler.linear_issue_count(), (2, 1))
-        self.assertEqual(scaler.request_json.call_count, 2)
 
-    def test_linear_rate_limit_reuses_last_count_during_shared_cooldown(self):
-        scaler = object.__new__(Scaler)
-        scaler.project_slug = "project"
-        scaler.linear_key = "key"
-        scaler.clock = 10
-        scaler.now = lambda: scaler.clock
-        scaler.linear_rate_limit_cooldown_seconds = 60
-        scaler.linear_cooldown_until = 0
-        scaler.last_linear_counts = (3, 1)
-        scaler.request_json = mock.Mock(return_value={
-            "errors": [{
-                "message": "Rate limit exceeded.",
-                "extensions": {"code": "RATELIMITED", "statusCode": 429},
-            }],
-        })
+class ScalerInitializationTest(unittest.TestCase):
+    def test_does_not_require_or_retain_linear_credentials(self):
+        environment = {
+            "KUBERNETES_SERVICE_HOST": "kubernetes.default.svc",
+            "SYMPHONY_WORKER_DRAIN_TOKEN": "d" * 32,
+        }
+        ledger = mock.Mock(load_errors=0)
 
-        self.assertEqual(scaler.linear_issue_count(), (3, 1))
-        self.assertEqual(scaler.linear_cooldown_until, 70)
-        self.assertEqual(scaler.request_json.call_count, 1)
+        with mock.patch.dict(os.environ, environment, clear=True), \
+                mock.patch("builtins.open", mock.mock_open(read_data="service-account-token")), \
+                mock.patch("scaler.ssl.create_default_context", return_value=object()), \
+                mock.patch("scaler.UsageLedger", return_value=ledger):
+            scaler = Scaler()
 
-        scaler.clock = 20
-        self.assertEqual(scaler.linear_issue_count(), (3, 1))
-        self.assertEqual(scaler.request_json.call_count, 1)
-
-    def test_linear_rate_limit_without_cached_count_fails_with_cooldown(self):
-        scaler = object.__new__(Scaler)
-        scaler.project_slug = "project"
-        scaler.linear_key = "key"
-        scaler.now = lambda: 10
-        scaler.linear_rate_limit_cooldown_seconds = 60
-        scaler.linear_cooldown_until = 0
-        scaler.last_linear_counts = None
-        scaler.request_json = mock.Mock(return_value={
-            "errors": [{
-                "extensions": {"code": "RATELIMITED", "statusCode": 429},
-            }],
-        })
-
-        with self.assertRaisesRegex(
-                RuntimeError, "Linear rate limited; shared cooldown has 60s remaining"):
-            scaler.linear_issue_count()
-        self.assertEqual(scaler.linear_cooldown_until, 70)
-        self.assertEqual(scaler.request_json.call_count, 1)
+        self.assertFalse(hasattr(scaler, "linear_key"))
+        self.assertFalse(hasattr(scaler, "project_slug"))
 
 
 class WorkerPoolActivityTest(unittest.TestCase):
@@ -648,6 +594,27 @@ class ApprovalHandoffTest(unittest.TestCase):
         self.assertEqual(
             self.handoff.reconcile(), {"observed": 1, "transitioned": 1, "failed": 0})
 
+    def test_malformed_provider_payloads_fail_closed(self):
+        self.handoff.request_json = mock.Mock(return_value={"data": None})
+        with self.assertRaisesRegex(ValueError, "invalid Linear"):
+            self.handoff.linear("query", {})
+
+        self.handoff.linear = mock.Mock(return_value={"issues": None})
+        with self.assertRaisesRegex(ValueError, "invalid Linear"):
+            list(self.handoff.review_issues())
+
+        self.handoff.github = mock.Mock(return_value=[])
+        with self.assertRaisesRegex(ValueError, "invalid GitHub"):
+            self.handoff.open_machine_pull_request(self.issue)
+
+        self.handoff.linear = mock.Mock(return_value={"issue": {"state": [], "team": {}}})
+        with self.assertRaisesRegex(ValueError, "invalid fresh Linear"):
+            self.handoff.fresh_state_and_destination("issue-210")
+
+        self.handoff.linear = mock.Mock(return_value={"issueUpdate": None})
+        with self.assertRaisesRegex(RuntimeError, "not acknowledged"):
+            self.handoff.transition("issue-210", "merging-state")
+
 
 class FakeScaler(Scaler):
     def __init__(self):
@@ -658,6 +625,7 @@ class FakeScaler(Scaler):
         self.maximum = 5
         self.agents_per_worker = 1
         self.cooldown_seconds = 1200
+        self.tracker_demand_max_age_seconds = 300
         self.symphony_drain_token = "d" * 32
         self.low_demand_since = None
         self.issues = 0
@@ -685,21 +653,25 @@ class FakeScaler(Scaler):
                         "last_error_stage": "", "last_error_timestamp": 0,
                         "last_success_timestamp": 0}
 
-    def linear_issue_count(self):
-        if self.fail:
-            raise RuntimeError("unavailable")
-        return self.issues, 0
-
     def symphony_state(self):
         if self.fail_symphony:
             raise RuntimeError("symphony unavailable")
         running = [{"worker_host": host} for host in self.active_hosts]
-        return {
+        state = {
             "counts": {"running": len(running), "retrying": 0},
             "running": running,
             "retrying": [],
             "worker_pool": {"configured_hosts": self.configured_hosts, "drained_hosts": self.drains},
+            "tracker": {
+                "runnable_issues": self.issues,
+                "blocked_issues": 0,
+                "observed_at": datetime.fromtimestamp(
+                    self.wall_clock(), timezone.utc).isoformat(),
+            },
         }
+        if self.fail:
+            state["tracker"] = None
+        return state
 
     def current_workers(self):
         if self.fail_kubernetes:
@@ -723,15 +695,17 @@ class FakeScaler(Scaler):
 
 class ReconcileTest(unittest.TestCase):
     def test_handoff_initialization_failures_leave_capacity_operational_and_retry(self):
+        linear_environment = {
+            "LINEAR_API_KEY": "linear",
+            "LINEAR_PROJECT_SLUG": "arrusted",
+        }
         for label, loader, environment in (
             ("malformed policy", mock.Mock(side_effect=ValueError("bad policy")),
-             {"GITHUB_TOKEN": "github"}),
-            ("missing token", mock.Mock(return_value=requester_policy()), {}),
+             {**linear_environment, "GITHUB_TOKEN": "github"}),
+            ("missing token", mock.Mock(return_value=requester_policy()), linear_environment),
         ):
             with self.subTest(label=label):
                 scaler = FakeScaler()
-                scaler.project_slug = "arrusted"
-                scaler.linear_key = "linear"
                 scaler.request_json = mock.Mock()
                 with mock.patch("scaler.load_requester_policy", loader), \
                         mock.patch.dict(os.environ, environment, clear=True), \
@@ -745,14 +719,19 @@ class ReconcileTest(unittest.TestCase):
                 self.assertEqual(loader.call_count, 2)
 
     def test_handoff_failure_does_not_fail_capacity_reconciliation(self):
-        scaler = FakeScaler()
-        scaler.approval_handoff = mock.Mock()
-        scaler.approval_handoff.reconcile.side_effect = RuntimeError("github unavailable")
-        with redirect_stderr(io.StringIO()):
-            scaler.run_once()
-        self.assertEqual(scaler.metrics["healthy"], 1)
-        self.assertEqual(scaler.metrics["handoff_failures"], 1)
-        self.assertEqual(scaler.metrics["errors"], 0)
+        for error in (
+                RuntimeError("github unavailable"),
+                TypeError("malformed response"),
+                AttributeError("missing response field")):
+            with self.subTest(error=type(error).__name__):
+                scaler = FakeScaler()
+                scaler.approval_handoff = mock.Mock()
+                scaler.approval_handoff.reconcile.side_effect = error
+                with redirect_stderr(io.StringIO()):
+                    scaler.run_once()
+                self.assertEqual(scaler.metrics["healthy"], 1)
+                self.assertEqual(scaler.metrics["handoff_failures"], 1)
+                self.assertEqual(scaler.metrics["errors"], 0)
 
     def test_capacity_failure_does_not_prevent_handoff_reconciliation(self):
         scaler = FakeScaler()
@@ -908,15 +887,15 @@ class ReconcileTest(unittest.TestCase):
             scaler.run_once()
         self.assertEqual(scaler.workers, 4)
         self.assertEqual(scaler.metrics["healthy"], 0)
-        self.assertEqual(scaler.metrics["last_error"], "RuntimeError")
-        self.assertEqual(scaler.metrics["last_error_stage"], "linear")
+        self.assertEqual(scaler.metrics["last_error"], "ValueError")
+        self.assertEqual(scaler.metrics["last_error_stage"], "tracker_demand")
         self.assertEqual(scaler.metrics["last_error_timestamp"], 1000)
-        self.assertEqual(scaler.error_counts, {("linear", "RuntimeError"): 1})
+        self.assertEqual(scaler.error_counts, {("tracker_demand", "ValueError"): 1})
         self.assertEqual(json.loads(output.getvalue()), {
-            "error": "unavailable",
-            "error_type": "RuntimeError",
+            "error": "invalid Symphony tracker demand",
+            "error_type": "ValueError",
             "event": "autoscaler_reconcile_failed",
-            "stage": "linear",
+            "stage": "tracker_demand",
             "timestamp": 1000,
         })
         scaler.fail = False
@@ -925,8 +904,8 @@ class ReconcileTest(unittest.TestCase):
         scaler.run_once()
         self.assertEqual(scaler.metrics["healthy"], 1)
         self.assertEqual(scaler.metrics["last_success_timestamp"], 1005)
-        self.assertEqual(scaler.metrics["last_error"], "RuntimeError")
-        self.assertEqual(scaler.metrics["last_error_stage"], "linear")
+        self.assertEqual(scaler.metrics["last_error"], "ValueError")
+        self.assertEqual(scaler.metrics["last_error_stage"], "tracker_demand")
 
     def test_failures_are_counted_by_reconcile_stage_and_type(self):
         scaler = FakeScaler()
@@ -959,12 +938,12 @@ class ReconcileTest(unittest.TestCase):
         scaler.run_once()
 
         recovered = "\n".join(metrics_lines(scaler))
-        self.assertIn('symphony_autoscaler_last_error{type="RuntimeError"} 1', recovered)
+        self.assertIn('symphony_autoscaler_last_error{type="ValueError"} 1', recovered)
         self.assertIn(
-            'symphony_autoscaler_last_error_info{stage="linear",type="RuntimeError"} 1',
+            'symphony_autoscaler_last_error_info{stage="tracker_demand",type="ValueError"} 1',
             recovered)
         self.assertIn(
-            'symphony_autoscaler_reconcile_errors_total{stage="linear",type="RuntimeError"} 1',
+            'symphony_autoscaler_reconcile_errors_total{stage="tracker_demand",type="ValueError"} 1',
             recovered)
         self.assertIn("symphony_autoscaler_last_error_timestamp_seconds 1000", recovered)
         self.assertIn("symphony_autoscaler_last_success_timestamp_seconds 1005", recovered)
