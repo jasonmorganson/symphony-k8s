@@ -1,6 +1,7 @@
 FROM elixir:1.19.5-otp-28
 
 ENV MIX_ENV=prod
+ENV SYMPHONY_RELEASE_FORMAT=otp
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mix local.hex --force && mix local.rebar --force
 
 ARG SYMPHONY_REPO=https://github.com/jasonmorganson/symphony.git
-ARG SYMPHONY_COMMIT=0c021e76315a510ac183ada37970c736e1562406
+ARG SYMPHONY_COMMIT=3742af85cee9fbb6de51d4a5e8fc1e1afcff55f6
 RUN if [ ! -f mix.exs ]; then \
       git clone --filter=blob:none --no-checkout "${SYMPHONY_REPO}" /tmp/symphony-src && \
       git -C /tmp/symphony-src fetch --depth=1 origin "${SYMPHONY_COMMIT}" && \

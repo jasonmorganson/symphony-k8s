@@ -276,6 +276,10 @@ class Scaler:
         self.maximum = int(os.getenv("MAX_WORKERS", "5"))
         self.agents_per_worker = int(os.getenv("AGENTS_PER_WORKER", "1"))
         self.cooldown_seconds = int(os.getenv("SCALE_DOWN_COOLDOWN_SECONDS", "1200"))
+        self.linear_rate_limit_cooldown_seconds = int(
+            os.getenv("LINEAR_RATE_LIMIT_COOLDOWN_SECONDS", "60"))
+        self.linear_cooldown_until = 0
+        self.last_linear_counts = None
         self.kube_host = os.environ["KUBERNETES_SERVICE_HOST"]
         self.kube_port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS", "443")
         self.token = open("/var/run/secrets/kubernetes.io/serviceaccount/token", encoding="utf-8").read().strip()
@@ -306,6 +310,9 @@ class Scaler:
             return json.load(response)
 
     def linear_issue_count(self):
+        if self.now() < self.linear_cooldown_until:
+            return self._linear_counts_during_cooldown()
+
         query = """query AutoscalerIssues($slug: String!, $states: [String!]!, $after: String) {
           issues(first: 100, after: $after, filter: {project: {slugId: {eq: $slug}}, state: {name: {in: $states}}}) {
             nodes {
@@ -325,9 +332,19 @@ class Scaler:
         while True:
             body = json.dumps({"query": query, "variables": {"slug": self.project_slug,
                               "states": list(RUNNABLE_STATES), "after": after}}).encode()
-            result = self.request_json(LINEAR_URL, data=body,
-                                       headers={"Authorization": self.linear_key, "Content-Type": "application/json"})
+            try:
+                result = self.request_json(
+                    LINEAR_URL, data=body,
+                    headers={"Authorization": self.linear_key, "Content-Type": "application/json"})
+            except urllib.error.HTTPError as error:
+                if self._linear_http_error_is_rate_limited(error):
+                    self._activate_linear_cooldown(self._retry_after_seconds(error))
+                    return self._linear_counts_during_cooldown()
+                raise
             if result.get("errors"):
+                if self._linear_result_is_rate_limited(result):
+                    self._activate_linear_cooldown()
+                    return self._linear_counts_during_cooldown()
                 raise RuntimeError("Linear GraphQL request failed")
             page = result["data"]["issues"]
             for issue in page["nodes"]:
@@ -336,8 +353,51 @@ class Scaler:
                 else:
                     blocked += 1
             if not page["pageInfo"]["hasNextPage"]:
-                return count, blocked
+                self.last_linear_counts = (count, blocked)
+                return self.last_linear_counts
             after = page["pageInfo"]["endCursor"]
+
+    def _activate_linear_cooldown(self, retry_after_seconds=None):
+        seconds = retry_after_seconds
+        if not isinstance(seconds, int) or seconds < 0:
+            seconds = self.linear_rate_limit_cooldown_seconds
+        self.linear_cooldown_until = max(self.linear_cooldown_until, self.now() + seconds)
+
+    def _linear_counts_during_cooldown(self):
+        if self.last_linear_counts is not None:
+            return self.last_linear_counts
+        remaining = max(0, math.ceil(self.linear_cooldown_until - self.now()))
+        raise RuntimeError(f"Linear rate limited; shared cooldown has {remaining}s remaining")
+
+    @staticmethod
+    def _linear_result_is_rate_limited(result):
+        errors = result.get("errors") if isinstance(result, dict) else None
+        if not isinstance(errors, list):
+            return False
+        for error in errors:
+            extensions = error.get("extensions") if isinstance(error, dict) else None
+            if isinstance(extensions, dict) and (
+                    extensions.get("code") == "RATELIMITED"
+                    or extensions.get("statusCode") == 429):
+                return True
+        return False
+
+    @classmethod
+    def _linear_http_error_is_rate_limited(cls, error):
+        if error.code == 429:
+            return True
+        try:
+            return cls._linear_result_is_rate_limited(json.load(error))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+
+    @staticmethod
+    def _retry_after_seconds(response):
+        value = response.headers.get("Retry-After") if response.headers is not None else None
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return None
 
     def symphony_state(self):
         state = self.request_json(self.symphony_url)
