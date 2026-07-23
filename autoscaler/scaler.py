@@ -10,11 +10,9 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-LINEAR_URL = "https://api.linear.app/graphql"
-RUNNABLE_STATES = ("Todo", "In Progress", "Rework", "Merging")
-TERMINAL_STATE_TYPES = ("completed", "canceled")
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens")
 
 
@@ -196,30 +194,30 @@ def desired_workers(issue_count, agents_per_worker=1, minimum=1, maximum=5):
     return max(minimum, min(maximum, math.ceil(issue_count / agents_per_worker)))
 
 
-def issue_is_runnable(issue):
-    state = issue.get("state")
-    if not isinstance(state, dict) or not isinstance(state.get("name"), str):
-        raise ValueError("invalid Linear issue state")
-    if state["name"] != "Todo":
-        return True
-    blockers = issue.get("inverseRelations")
-    if not isinstance(blockers, dict) or not isinstance(blockers.get("nodes"), list) \
-            or not isinstance(blockers.get("pageInfo"), dict):
-        raise ValueError("invalid Linear blocker relations")
-    if blockers["pageInfo"].get("hasNextPage"):
-        raise RuntimeError("Linear issue has more blockers than the autoscaler query limit")
-    for relation in blockers["nodes"]:
-        if not isinstance(relation, dict) or not isinstance(relation.get("type"), str):
-            raise ValueError("invalid Linear blocker relation")
-        if relation["type"] != "blocks":
-            continue
-        blocker = relation.get("issue")
-        blocker_state = blocker.get("state") if isinstance(blocker, dict) else None
-        if not isinstance(blocker_state, dict) or not isinstance(blocker_state.get("type"), str):
-            raise ValueError("invalid Linear blocker state")
-        if blocker_state["type"] not in TERMINAL_STATE_TYPES:
-            return False
-    return True
+def tracker_demand(state, now=None, maximum_age_seconds=None):
+    tracker = state.get("tracker") if isinstance(state, dict) else None
+    if not isinstance(tracker, dict):
+        raise ValueError("invalid Symphony tracker demand")
+    runnable = tracker.get("runnable_issues")
+    blocked = tracker.get("blocked_issues")
+    observed_at = tracker.get("observed_at")
+    if type(runnable) is not int or runnable < 0 \
+            or type(blocked) is not int or blocked < 0 \
+            or not isinstance(observed_at, str) or not observed_at:
+        raise ValueError("invalid Symphony tracker demand")
+    try:
+        observed_timestamp = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        if observed_timestamp.tzinfo is None:
+            raise ValueError
+        observed_timestamp = observed_timestamp.astimezone(timezone.utc).timestamp()
+    except (OverflowError, ValueError):
+        raise ValueError("invalid Symphony tracker demand") from None
+    if now is not None and (
+            observed_timestamp > now
+            or maximum_age_seconds is None
+            or now - observed_timestamp > maximum_age_seconds):
+        raise ValueError("stale Symphony tracker demand")
+    return runnable, blocked
 
 
 def worker_pool_activity(state, current_workers, statefulset="symphony-worker"):
@@ -264,8 +262,6 @@ class Scaler:
         self.wall_clock = wall_clock
         self.namespace = os.getenv("POD_NAMESPACE", "symphony")
         self.statefulset = os.getenv("WORKER_STATEFULSET", "symphony-worker")
-        self.project_slug = os.environ["LINEAR_PROJECT_SLUG"]
-        self.linear_key = os.environ["LINEAR_API_KEY"]
         self.symphony_url = os.getenv("SYMPHONY_STATE_URL", "http://symphony-orchestrator:4000/api/v1/state")
         self.symphony_drains_url = os.getenv(
             "SYMPHONY_DRAINS_URL", "http://symphony-orchestrator:4000/api/v1/worker-drains")
@@ -276,10 +272,8 @@ class Scaler:
         self.maximum = int(os.getenv("MAX_WORKERS", "5"))
         self.agents_per_worker = int(os.getenv("AGENTS_PER_WORKER", "1"))
         self.cooldown_seconds = int(os.getenv("SCALE_DOWN_COOLDOWN_SECONDS", "1200"))
-        self.linear_rate_limit_cooldown_seconds = int(
-            os.getenv("LINEAR_RATE_LIMIT_COOLDOWN_SECONDS", "60"))
-        self.linear_cooldown_until = 0
-        self.last_linear_counts = None
+        self.tracker_demand_max_age_seconds = int(
+            os.getenv("TRACKER_DEMAND_MAX_AGE_SECONDS", "300"))
         self.kube_host = os.environ["KUBERNETES_SERVICE_HOST"]
         self.kube_port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS", "443")
         self.token = open("/var/run/secrets/kubernetes.io/serviceaccount/token", encoding="utf-8").read().strip()
@@ -308,96 +302,6 @@ class Scaler:
         request = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
         with urllib.request.urlopen(request, timeout=10, context=context) as response:
             return json.load(response)
-
-    def linear_issue_count(self):
-        if self.now() < self.linear_cooldown_until:
-            return self._linear_counts_during_cooldown()
-
-        query = """query AutoscalerIssues($slug: String!, $states: [String!]!, $after: String) {
-          issues(first: 100, after: $after, filter: {project: {slugId: {eq: $slug}}, state: {name: {in: $states}}}) {
-            nodes {
-              id
-              state { name }
-              inverseRelations(first: 50) {
-                nodes { type issue { state { type } } }
-                pageInfo { hasNextPage }
-              }
-            }
-            pageInfo { hasNextPage endCursor }
-          }
-        }"""
-        count = 0
-        blocked = 0
-        after = None
-        while True:
-            body = json.dumps({"query": query, "variables": {"slug": self.project_slug,
-                              "states": list(RUNNABLE_STATES), "after": after}}).encode()
-            try:
-                result = self.request_json(
-                    LINEAR_URL, data=body,
-                    headers={"Authorization": self.linear_key, "Content-Type": "application/json"})
-            except urllib.error.HTTPError as error:
-                if self._linear_http_error_is_rate_limited(error):
-                    self._activate_linear_cooldown(self._retry_after_seconds(error))
-                    return self._linear_counts_during_cooldown()
-                raise
-            if result.get("errors"):
-                if self._linear_result_is_rate_limited(result):
-                    self._activate_linear_cooldown()
-                    return self._linear_counts_during_cooldown()
-                raise RuntimeError("Linear GraphQL request failed")
-            page = result["data"]["issues"]
-            for issue in page["nodes"]:
-                if issue_is_runnable(issue):
-                    count += 1
-                else:
-                    blocked += 1
-            if not page["pageInfo"]["hasNextPage"]:
-                self.last_linear_counts = (count, blocked)
-                return self.last_linear_counts
-            after = page["pageInfo"]["endCursor"]
-
-    def _activate_linear_cooldown(self, retry_after_seconds=None):
-        seconds = retry_after_seconds
-        if not isinstance(seconds, int) or seconds < 0:
-            seconds = self.linear_rate_limit_cooldown_seconds
-        self.linear_cooldown_until = max(self.linear_cooldown_until, self.now() + seconds)
-
-    def _linear_counts_during_cooldown(self):
-        if self.last_linear_counts is not None:
-            return self.last_linear_counts
-        remaining = max(0, math.ceil(self.linear_cooldown_until - self.now()))
-        raise RuntimeError(f"Linear rate limited; shared cooldown has {remaining}s remaining")
-
-    @staticmethod
-    def _linear_result_is_rate_limited(result):
-        errors = result.get("errors") if isinstance(result, dict) else None
-        if not isinstance(errors, list):
-            return False
-        for error in errors:
-            extensions = error.get("extensions") if isinstance(error, dict) else None
-            if isinstance(extensions, dict) and (
-                    extensions.get("code") == "RATELIMITED"
-                    or extensions.get("statusCode") == 429):
-                return True
-        return False
-
-    @classmethod
-    def _linear_http_error_is_rate_limited(cls, error):
-        if error.code == 429:
-            return True
-        try:
-            return cls._linear_result_is_rate_limited(json.load(error))
-        except (OSError, ValueError, TypeError, AttributeError):
-            return False
-
-    @staticmethod
-    def _retry_after_seconds(response):
-        value = response.headers.get("Retry-After") if response.headers is not None else None
-        try:
-            return max(0, int(value))
-        except (TypeError, ValueError):
-            return None
 
     def symphony_state(self):
         state = self.request_json(self.symphony_url)
@@ -468,8 +372,10 @@ class Scaler:
         return ready
 
     def reconcile(self):
-        issue_count, blocked_count = self.at_stage("linear", self.linear_issue_count)
         state = self.at_stage("symphony_state", self.symphony_state)
+        issue_count, blocked_count = self.at_stage(
+            "tracker_demand", tracker_demand, state,
+            self.wall_clock(), self.tracker_demand_max_age_seconds)
         current, resource_version = self.at_stage("kubernetes_scale_read", self.current_workers)
         busy, active_floor, configured_hosts = self.at_stage(
             "state_validation", worker_pool_activity, state, current, self.statefulset)

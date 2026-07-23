@@ -67,6 +67,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # Retained until this manifest pins an autoscaler image containing
+            # the Symphony tracker-demand consumer.
             - name: LINEAR_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -87,10 +89,10 @@ spec:
               value: "1"
             - name: POLL_INTERVAL_SECONDS
               value: "60"
-            - name: LINEAR_RATE_LIMIT_COOLDOWN_SECONDS
-              value: "60"
             - name: SCALE_DOWN_COOLDOWN_SECONDS
               value: "1200"
+            - name: TRACKER_DEMAND_MAX_AGE_SECONDS
+              value: "300"
             - name: USAGE_LEDGER_PATH
               value: /var/lib/symphony-metrics/usage.json
           ports:
