@@ -876,12 +876,17 @@ class Scaler:
 
     def reconcile(self):
         state = self.at_stage("symphony_state", self.symphony_state)
-        issue_count, blocked_count = self.at_stage(
-            "tracker_demand", tracker_demand, state,
-            self.wall_clock(), self.tracker_demand_max_age_seconds)
         current, resource_version = self.at_stage("kubernetes_scale_read", self.current_workers)
         busy, active_floor, configured_hosts = self.at_stage(
             "state_validation", worker_pool_activity, state, current, self.statefulset)
+        try:
+            issue_count, blocked_count = self.at_stage(
+                "tracker_demand", tracker_demand, state,
+                self.wall_clock(), self.tracker_demand_max_age_seconds)
+        except ValueError:
+            if busy == 0:
+                raise
+            issue_count, blocked_count = busy, 0
         ready = self.at_stage("kubernetes_pods", self.ready_workers, configured_hosts, current)
         target = self.at_stage(
             "demand_calculation", desired_workers,
