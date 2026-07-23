@@ -31,6 +31,7 @@ grep -A2 'name: REQUESTER_POLICY_PATH' "$autoscaler" | \
 grep -A1 'name: APPROVAL_HANDOFF_RETRY_SECONDS' "$autoscaler" | grep -q 'value: "300"'
 grep -A1 'name: POLL_INTERVAL_SECONDS' "$autoscaler" | grep -q 'value: "60"'
 grep -A5 'name: workflow$' "$autoscaler" | grep -q 'requester-policy.json'
+grep -A4 'name: symphony-workflow$' "$autoscaler" | grep -q 'optional: true'
 if grep -A8 '^  active_states:' "$runtime" | grep -q 'Human Review'; then
   echo "Human Review must remain passive and absent from tracker.active_states" >&2
   exit 1
