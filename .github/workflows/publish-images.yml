@@ -8,8 +8,9 @@ on:
       - docker/**
       - autoscaler/**
       - docker/worker/**
+      - config/**
       - k8s/**
-      - scripts/deploy-digitalocean.sh
+      - scripts/**
       - tests/**
       - .github/workflows/publish-images.yml
 
@@ -20,13 +21,21 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-24.04
+    outputs:
+      orchestrator_image: ${{ steps.image-digests.outputs.orchestrator_image }}
+      worker_image: ${{ steps.image-digests.outputs.worker_image }}
+      autoscaler_image: ${{ steps.image-digests.outputs.autoscaler_image }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install pinned Kustomize
+        run: |
+          bash scripts/install-kustomize.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: Test autoscaler
         run: PYTHONPATH=autoscaler python3 -m unittest -v autoscaler/test_scaler.py
       - name: Test worker authentication
@@ -37,6 +46,10 @@ jobs:
         run: bash tests/test-workflow-cost-controls.sh
       - name: Test DOKS deployment hardening
         run: bash tests/test-doks-deploy.sh
+      - name: Test Kustomize deployment boundaries
+        env:
+          KUSTOMIZE: kustomize build
+        run: bash tests/test-kustomize-boundaries.sh
       - name: Build images
         run: |
           docker build -t symphony-runtime-base:do -f docker/runtime-base/Dockerfile .
@@ -44,21 +57,87 @@ jobs:
           docker build \
             --build-arg RUNTIME_BASE=symphony-runtime-base:do \
             --build-arg SYMPHONY_RELEASE_IMAGE=symphony-release:do \
-            -t ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA} \
+            -t "ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA}" \
             -f docker/orchestrator/Dockerfile .
           docker build \
             --build-arg RUNTIME_BASE=symphony-runtime-base:do \
-            -t ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA} \
+            -t "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" \
             -t ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt \
             -f docker/worker/Dockerfile .
           docker run --rm --entrypoint gh \
-            ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA} --version
+            "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" --version
           docker build \
-            -t ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA} \
+            -t "ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA}" \
             -f docker/autoscaler/Dockerfile .
       - name: Push images
         run: |
-          docker push ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA}
+          docker push "ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA}"
           docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt
-          docker push ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}
-          docker push ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA}
+          docker push "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}"
+          docker push "ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA}"
+      - name: Resolve immutable image digests
+        id: image-digests
+        run: |
+          set -euo pipefail
+          orchestrator_repository="ghcr.io/jasonmorganson/symphony-k8s-orchestrator"
+          worker_repository="ghcr.io/jasonmorganson/symphony-k8s-worker"
+          autoscaler_repository="ghcr.io/jasonmorganson/symphony-k8s-autoscaler"
+          orchestrator_digest="$(docker buildx imagetools inspect \
+            "${orchestrator_repository}:${GITHUB_SHA}" --format '{{.Manifest.Digest}}')"
+          worker_digest="$(docker buildx imagetools inspect \
+            "${worker_repository}:${GITHUB_SHA}" --format '{{.Manifest.Digest}}')"
+          autoscaler_digest="$(docker buildx imagetools inspect \
+            "${autoscaler_repository}:${GITHUB_SHA}" --format '{{.Manifest.Digest}}')"
+          {
+            echo "orchestrator_image=${orchestrator_repository}@${orchestrator_digest}"
+            echo "worker_image=${worker_repository}@${worker_digest}"
+            echo "autoscaler_image=${autoscaler_repository}@${autoscaler_digest}"
+          } >> "$GITHUB_OUTPUT"
+
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    environment:
+      name: production
+      url: https://symphony.morganson.me
+    concurrency:
+      group: production-doks
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install doctl
+        uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Install pinned Kustomize
+        run: |
+          bash scripts/install-kustomize.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Deploy immutable images to DOKS
+        env:
+          ORCHESTRATOR_IMAGE: ${{ needs.publish.outputs.orchestrator_image }}
+          WORKER_IMAGE: ${{ needs.publish.outputs.worker_image }}
+          AUTOSCALER_IMAGE: ${{ needs.publish.outputs.autoscaler_image }}
+          SOURCE_REVISION: ${{ github.sha }}
+          DOKS_REFRESH_KUBECONFIG: "true"
+          SYMPHONY_WAIT_FOR_IDLE: "true"
+          SYMPHONY_IDLE_TIMEOUT_SECONDS: "3600"
+          SYMPHONY_IDLE_POLL_SECONDS: "30"
+        run: bash scripts/deploy-digitalocean.sh
+      - name: Record deployment
+        env:
+          ORCHESTRATOR_IMAGE: ${{ needs.publish.outputs.orchestrator_image }}
+          WORKER_IMAGE: ${{ needs.publish.outputs.worker_image }}
+          AUTOSCALER_IMAGE: ${{ needs.publish.outputs.autoscaler_image }}
+        run: |
+          {
+            echo "## Production DOKS deployment"
+            echo
+            echo "- Revision: \`${GITHUB_SHA}\`"
+            echo "- Orchestrator: \`${ORCHESTRATOR_IMAGE}\`"
+            echo "- Worker template: \`${WORKER_IMAGE}\`"
+            echo "- Autoscaler: \`${AUTOSCALER_IMAGE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

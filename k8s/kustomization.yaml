@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: symphony
+
+resources:
+  - digitalocean
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: symphony-workflow
+    files:
+      - WORKFLOW.md=base/generated/skaffold/workflow/WORKFLOW.md
+
+secretGenerator:
+  - name: symphony-secrets
+    envs:
+      - base/generated/skaffold/secrets/symphony-secrets.env
+  - name: symphony-orchestrator-ssh
+    files:
+      - id_ed25519=base/generated/skaffold/ssh/orchestrator_id_ed25519
+      - known_hosts=base/generated/skaffold/ssh/known_hosts
+      - config=base/generated/skaffold/ssh/config
+  - name: symphony-worker-authorized-keys
+    files:
+      - authorized_keys=base/generated/skaffold/ssh/orchestrator_id_ed25519.pub
+  - name: symphony-worker-hostkeys
+    files:
+      - ssh_host_ed25519_key=base/generated/skaffold/ssh/ssh_host_ed25519_key
+      - ssh_host_ed25519_key.pub=base/generated/skaffold/ssh/ssh_host_ed25519_key.pub
