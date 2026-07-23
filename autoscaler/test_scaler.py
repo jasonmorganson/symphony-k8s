@@ -984,6 +984,21 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(scaler.metrics["healthy"], 1)
         self.assertEqual(scaler.drains, ["symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
 
+    def test_active_runtime_demand_recovers_when_tracker_observation_is_missing(self):
+        scaler = FakeScaler()
+        scaler.fail = True
+        scaler.active_hosts = [
+            "symphony-worker-0",
+            "symphony-worker-1",
+            "symphony-worker-2",
+            "symphony-worker-3",
+            "symphony-worker-4",
+        ]
+        scaler.run_once()
+        self.assertEqual(scaler.changes, [5])
+        self.assertEqual(scaler.metrics["healthy"], 1)
+        self.assertEqual(scaler.metrics["queue"], 5)
+
     def test_active_scale_down_drains_then_removes_trailing_idle_workers(self):
         scaler = FakeScaler()
         scaler.workers = 5
