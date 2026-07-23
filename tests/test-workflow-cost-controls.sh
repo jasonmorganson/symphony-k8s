@@ -30,10 +30,16 @@ grep -A2 'name: REQUESTER_POLICY_PATH' "$autoscaler" | \
 grep -A1 'name: APPROVAL_HANDOFF_RETRY_SECONDS' "$autoscaler" | grep -q 'value: "300"'
 grep -A1 'name: POLL_INTERVAL_SECONDS' "$autoscaler" | grep -q 'value: "60"'
 grep -A5 'name: workflow$' "$autoscaler" | grep -q 'requester-policy.json'
-if grep -A8 '^  active_states:' "$runtime" | grep -q 'In Review'; then
-  echo "In Review must remain passive and absent from tracker.active_states" >&2
+if grep -A8 '^  active_states:' "$runtime" | grep -q 'Human Review'; then
+  echo "Human Review must remain passive and absent from tracker.active_states" >&2
   exit 1
 fi
+for state in Merging Rework; do
+  if ! grep -A8 '^  active_states:' "$runtime" | grep -q -- "- $state"; then
+    echo "$state must remain active in the upstream Symphony workflow" >&2
+    exit 1
+  fi
+done
 grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$generator"
 grep -A1 'name: MAX_WORKERS' "$ROOT_DIR/k8s/digitalocean/autoscaler.yaml" | grep -q 'value: "10"'
 

@@ -214,7 +214,7 @@ after recovery. The aggregate error counter remains available for alerts,
 while `symphony_autoscaler_reconcile_errors_total` attributes failures by stage
 and exception type.
 
-The same loop handles approvals for passive `In Review` issues without adding
+The same loop handles approvals for passive `Human Review` issues without adding
 that state to Symphony's active-state set. Discovery is GitHub-first: it scans
 open pull requests, parses the canonical requester and Linear metadata, and
 checks the mapped requester's current effective human `APPROVED` review. Idle,
@@ -222,12 +222,18 @@ unapproved, user-authored, and malformed candidates make zero Linear requests.
 Only a currently approved candidate causes a fresh Linear issue read. The
 monitor then verifies the creator, project, canonical link, and state, freshly
 rechecks every attached PR plus the requester's review and candidate head, and
-may perform only the policy's `In Review` to `Merging` mutation. Identical
+may perform only the policy's `Human Review` to `Merging` mutation. Identical
 candidates that cannot transition are deferred for five minutes, bounding
 retries without delaying a new approval or head revision. Candidate,
 Linear-request, deferred, transition, and failure totals are exposed through
 the `symphony_approval_handoff_*` metrics. GitHub and handoff failures remain
 isolated from capacity reconciliation.
+
+Before enabling a revision that changes the passive review-state name, migrate
+every existing review-lane issue to the policy's `source_state`. For the
+`Human Review` alignment, move A-210 and A-229 out of stale `In Review` before
+rolling the monitor; otherwise the fail-closed source-state check intentionally
+ignores them. Remove the unused Linear state only after no issue references it.
 
 The DOKS deploy entrypoint regenerates these inputs only from a clean,
 up-to-date Arrusted `main` checkout. It rejects dirty, non-`main`, or stale
@@ -348,7 +354,7 @@ input tokens and 88 thousand output tokens; the later live total reached 68.9
 million input tokens. One issue consumed about 7.6 million input tokens across
 four agent turns. The optimized workflow uses medium rather than xhigh reasoning,
 permits one agent per worker and one merge at a time,
-polls every 60 seconds, and does not dispatch agents for passive `In Review`.
+polls every 60 seconds, and does not dispatch agents for passive `Human Review`.
 It also bounds the Linear workpad and consolidates asynchronous review findings
 before a full-repository gate on the final code-bearing tree, avoiding repeated
 context resubmission and full validation for each overlapping review comment.

@@ -76,10 +76,60 @@ tracker:
 ---
 # Test workflow
 
-In Review moves to Merging after requester approval.
+Human Review moves to Merging after requester approval.
 EOF
 cat > "$SOURCE_REPO/.config/symphony/requester-policy.json" <<'EOF'
-{"schema_version":1,"approval_handoff":{"source_state":"In Review","destination_state":"Merging"}}
+{
+  "$schema": "./requester-policy.schema.json",
+  "schema_version": 1,
+  "repository": "withAutograph/arrusted-development",
+  "machine_login": "autograph-symphony",
+  "runtime_scope": ["local", "vm", "container", "kubernetes"],
+  "requester": {
+    "source": "linear_issue_creator",
+    "resolution": "exactly_one_mapping_or_fail_closed",
+    "creator_email_mappings": [
+      {
+        "linear_creator_email": "jason@withgraph.com",
+        "github_login": "jasonmorganson"
+      }
+    ]
+  },
+  "pull_request": {
+    "attached_open_count": 1,
+    "author": "machine_login",
+    "reconciliation": {
+      "none": "create",
+      "one": "reuse_and_repair",
+      "ambiguous": "fail_closed"
+    },
+    "required_body_metadata": [
+      "requester",
+      "canonical_linear_issue_link",
+      "exactly_one_fixes_issue_id"
+    ],
+    "review_request": "mapped_requester_on_create_or_reuse"
+  },
+  "approval_handoff": {
+    "source_state": "Human Review",
+    "destination_state": "Merging",
+    "review_pull_request": "attached_open_pull_request",
+    "actor": "mapped_requester",
+    "actor_type": "human",
+    "state": "APPROVED",
+    "latest_by": "submitted_at",
+    "ignored_review_states": ["COMMENTED"],
+    "conflicting_latest_timestamp": "fail_closed",
+    "concurrent_state_drift": "fail_closed"
+  },
+  "monitor": {
+    "owner": "existing_workflow_monitor",
+    "polling": "existing_monitor_loop",
+    "discovery": "github_open_machine_pull_requests",
+    "linear_access": "approved_candidates_only",
+    "github_credential": "github-machine-arrusted-symphony"
+  }
+}
 EOF
 git -C "$SOURCE_REPO" add WORKFLOW.md .config/symphony/requester-policy.json
 git -C "$SOURCE_REPO" commit -m "test workflow" >/dev/null
@@ -106,9 +156,9 @@ grep -q 'requester-policy.json:' "$TEMP_DIR/rendered.yaml"
 grep -q 'workflow-source.json:' "$TEMP_DIR/rendered.yaml"
 source_revision="$(git -C "$SOURCE_REPO" rev-parse HEAD)"
 grep -q "\"revision\":\"$source_revision\"" "$TEMP_DIR/rendered.yaml"
-grep -q 'In Review' "$TEMP_DIR/rendered.yaml"
-if grep -q 'Human Review' "$TEMP_DIR/rendered.yaml"; then
-  echo "rendered workflow ConfigMap must not contain Human Review" >&2
+grep -q 'Human Review' "$TEMP_DIR/rendered.yaml"
+if grep -q 'In Review' "$TEMP_DIR/rendered.yaml"; then
+  echo "rendered workflow ConfigMap must not contain In Review" >&2
   exit 1
 fi
 workflow_config_name="$(
@@ -129,6 +179,86 @@ for deployment in coredns konnectivity-agent hubble-relay hubble-ui; do
 done
 grep -F '"doks.digitalocean.com/node-pool":"durable-system"' "$KUBECTL_LOG"
 grep -F '"key":"symphony.morganson.me/workload"' "$KUBECTL_LOG"
+
+python3 - "$SOURCE_REPO/.config/symphony/requester-policy.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    policy = json.load(source)
+policy["approval_handoff"]["source_state"] = "In Review"
+with open(path, "w", encoding="utf-8") as target:
+    json.dump(policy, target)
+PY
+git -C "$SOURCE_REPO" add .config/symphony/requester-policy.json
+git -C "$SOURCE_REPO" commit -m "stale requester policy" >/dev/null
+git -C "$SOURCE_REPO" push origin main >/dev/null
+: > "$KUBECTL_LOG"
+: > "$DOCTL_LOG"
+if bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
+  echo "stale requester policy must fail preflight" >&2
+  exit 1
+fi
+if ! cmp -s "$SOURCE_REPO/.config/symphony/requester-policy.json" \
+    "$ROOT_DIR/k8s/base/generated/skaffold/workflow/requester-policy.json"; then
+  echo "preflight must validate the exact copied requester policy" >&2
+  exit 1
+fi
+if grep -F "apply -f" "$KUBECTL_LOG" || [[ -s "$DOCTL_LOG" ]]; then
+  echo "stale requester policy must fail before provider mutation" >&2
+  exit 1
+fi
+python3 - "$SOURCE_REPO/.config/symphony/requester-policy.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    policy = json.load(source)
+policy["approval_handoff"]["source_state"] = "Human Review"
+with open(path, "w", encoding="utf-8") as target:
+    json.dump(policy, target)
+PY
+git -C "$SOURCE_REPO" add .config/symphony/requester-policy.json
+git -C "$SOURCE_REPO" commit -m "restore requester policy" >/dev/null
+git -C "$SOURCE_REPO" push origin main >/dev/null
+
+cp "$SOURCE_REPO/.config/symphony/requester-policy.json" "$TEMP_DIR/valid-requester-policy.json"
+python3 - "$SOURCE_REPO/.config/symphony/requester-policy.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    policy = json.load(source)
+del policy["monitor"]
+with open(path, "w", encoding="utf-8") as target:
+    json.dump(policy, target)
+PY
+git -C "$SOURCE_REPO" add .config/symphony/requester-policy.json
+git -C "$SOURCE_REPO" commit -m "malformed requester policy" >/dev/null
+git -C "$SOURCE_REPO" push origin main >/dev/null
+: > "$KUBECTL_LOG"
+: > "$DOCTL_LOG"
+if bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
+  echo "malformed requester policy must fail preflight" >&2
+  exit 1
+fi
+if ! cmp -s "$SOURCE_REPO/.config/symphony/requester-policy.json" \
+    "$ROOT_DIR/k8s/base/generated/skaffold/workflow/requester-policy.json"; then
+  echo "preflight must validate the exact copied requester policy" >&2
+  exit 1
+fi
+if grep -F "apply -f" "$KUBECTL_LOG" || [[ -s "$DOCTL_LOG" ]]; then
+  echo "malformed requester policy must fail before provider mutation" >&2
+  exit 1
+fi
+cp "$TEMP_DIR/valid-requester-policy.json" \
+  "$SOURCE_REPO/.config/symphony/requester-policy.json"
+git -C "$SOURCE_REPO" add .config/symphony/requester-policy.json
+git -C "$SOURCE_REPO" commit -m "restore valid requester policy" >/dev/null
+git -C "$SOURCE_REPO" push origin main >/dev/null
 
 cat > "$TEMP_DIR/bad-docker" <<'EOF'
 #!/usr/bin/env bash

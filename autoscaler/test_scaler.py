@@ -36,7 +36,7 @@ def requester_policy():
             "review_request": "mapped_requester_on_create_or_reuse",
         },
         "approval_handoff": {
-            "source_state": "In Review",
+            "source_state": "Human Review",
             "destination_state": "Merging",
             "review_pull_request": "attached_open_pull_request",
             "actor": "mapped_requester",
@@ -449,7 +449,7 @@ class ApprovalHandoffTest(unittest.TestCase):
             "identifier": "A-210",
             "url": "https://linear.app/withgraph/issue/A-210/approval-handoff",
             "creator": {"email": "jason@withgraph.com"},
-            "state": {"name": "In Review"},
+            "state": {"name": "Human Review"},
             "project": {"slugId": "arrusted"},
             "attachments": {
                 "nodes": [
@@ -459,7 +459,7 @@ class ApprovalHandoffTest(unittest.TestCase):
                 "pageInfo": {"hasNextPage": False},
             },
             "team": {"states": {"nodes": [
-                {"id": "review-state", "name": "In Review"},
+                {"id": "review-state", "name": "Human Review"},
                 {"id": "merging-state", "name": "Merging"},
             ]}},
         }
@@ -479,7 +479,7 @@ class ApprovalHandoffTest(unittest.TestCase):
                 policy = requester_policy()
                 policy.pop("_requester_by_email")
                 if mutate == "state":
-                    policy["approval_handoff"]["source_state"] = "Human Review"
+                    policy["approval_handoff"]["source_state"] = "In Review"
                 elif mutate == "mapping":
                     policy["requester"]["creator_email_mappings"].append(
                         dict(policy["requester"]["creator_email_mappings"][0]))
@@ -520,7 +520,7 @@ class ApprovalHandoffTest(unittest.TestCase):
             loaded = load_requester_policy(path)
         self.assertEqual(loaded["$schema"], "./requester-policy.schema.json")
         self.assertEqual(loaded["repository"], "withAutograph/arrusted-development")
-        self.assertEqual(loaded["approval_handoff"]["source_state"], "In Review")
+        self.assertEqual(loaded["approval_handoff"]["source_state"], "Human Review")
         self.assertEqual(
             loaded["_requester_by_email"],
             {"jason@withgraph.com": "jasonmorganson"},
@@ -775,13 +775,16 @@ class ApprovalHandoffTest(unittest.TestCase):
                 handoff.transition.assert_not_called()
 
     def test_concurrent_state_drift_prevents_mutation(self):
-        issue = {**self.issue, "state": {"name": "Merging"}}
-        self.handoff.reviews = mock.Mock(return_value=[self.approval])
-        self.handoff.fresh_issue = mock.Mock(return_value=issue)
-        self.handoff.transition = mock.Mock()
-        self.assertEqual(
-            self.handoff.reconcile_pull(self.pull), "linear_ineligible")
-        self.handoff.transition.assert_not_called()
+        for state in ("Merging", "In Review"):
+            with self.subTest(state=state):
+                self.handoff.candidate_attempts = {}
+                issue = {**self.issue, "state": {"name": state}}
+                self.handoff.reviews = mock.Mock(return_value=[self.approval])
+                self.handoff.fresh_issue = mock.Mock(return_value=issue)
+                self.handoff.transition = mock.Mock()
+                self.assertEqual(
+                    self.handoff.reconcile_pull(self.pull), "linear_ineligible")
+                self.handoff.transition.assert_not_called()
 
     def test_candidate_retry_cache_bounds_linear_requests_and_allows_recovery(self):
         issue = {**self.issue, "state": {"name": "Merging"}}

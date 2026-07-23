@@ -70,8 +70,8 @@ if [[ "${SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE:-0}" == "1" ]]; then
   fi
 fi
 workflow_revision="$(git -C "$workflow_repository" rev-parse HEAD)"
-if grep -Fq 'Human Review' "$workflow_file" || ! grep -Fq 'In Review' "$workflow_file"; then
-  printf 'Canonical workflow must contain In Review and no Human Review: %s\n' "$workflow_file" >&2
+if grep -Fq 'In Review' "$workflow_file" || ! grep -Fq 'Human Review' "$workflow_file"; then
+  printf 'Canonical workflow must contain Human Review and no In Review: %s\n' "$workflow_file" >&2
   exit 1
 fi
 
@@ -131,6 +131,17 @@ fi
 
 write_if_changed "$workflow_dir/WORKFLOW.md" "$(printf '%s\n%s\n%s\n%s' '---' "$(cat "$runtime_file")" '---' "$workflow_body")"
 cp "$policy_file" "$workflow_dir/requester-policy.json"
+PYTHONPATH="$ROOT_DIR" python3 - "$workflow_dir/requester-policy.json" <<'PY'
+import sys
+
+from autoscaler.scaler import load_requester_policy
+
+try:
+    load_requester_policy(sys.argv[1])
+except Exception as error:
+    print(f"Invalid canonical requester policy: {error}", file=sys.stderr)
+    raise SystemExit(1) from error
+PY
 write_if_changed "$workflow_dir/workflow-source.json" "$(printf \
   '{"repository":"%s","revision":"%s","workflow":"WORKFLOW.md","requester_policy":".config/symphony/requester-policy.json"}' \
   "$(git -C "$workflow_repository" config --get remote.origin.url)" "$workflow_revision")"

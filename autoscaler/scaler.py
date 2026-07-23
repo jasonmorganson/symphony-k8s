@@ -315,7 +315,7 @@ def load_requester_policy(path):
             ["requester", "canonical_linear_issue_link", "exactly_one_fixes_issue_id"]),
         "pull_request.review_request": (
             pull_request.get("review_request"), "mapped_requester_on_create_or_reuse"),
-        "approval_handoff.source_state": (handoff.get("source_state"), "In Review"),
+        "approval_handoff.source_state": (handoff.get("source_state"), "Human Review"),
         "approval_handoff.destination_state": (handoff.get("destination_state"), "Merging"),
         "approval_handoff.review_pull_request": (
             handoff.get("review_pull_request"), "attached_open_pull_request"),
