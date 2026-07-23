@@ -1114,14 +1114,16 @@ class ReconcileTest(unittest.TestCase):
             ("scale", 3),
         ])
 
-    def test_scale_up_stops_if_fence_acknowledges_an_active_future_host(self):
+    def test_scale_up_creates_capacity_for_active_future_host_reservations(self):
         scaler = FakeScaler()
         scaler.workers = 2
         scaler.ready = 2
         scaler.issues = 3
         scaler.drain_race = ["symphony-worker-2"]
         scaler.run_once()
-        self.assertEqual(scaler.changes, [])
+        self.assertEqual(scaler.changes, [3])
+        self.assertEqual(scaler.drains, [
+            "symphony-worker-2", "symphony-worker-3", "symphony-worker-4"])
 
     def test_failure_retains_capacity_and_recovers(self):
         scaler = FakeScaler()
