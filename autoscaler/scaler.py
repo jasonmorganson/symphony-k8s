@@ -188,7 +188,7 @@ class UsageLedger:
             return {"version": 1, "sessions": sessions, "issues": by_issue}
 
 
-def desired_workers(issue_count, agents_per_worker=1, minimum=1, maximum=5):
+def desired_workers(issue_count, agents_per_worker=1, minimum=1, maximum=10):
     if issue_count == 0:
         return 0
     return max(minimum, min(maximum, math.ceil(issue_count / agents_per_worker)))
@@ -269,7 +269,7 @@ class Scaler:
         if len(self.symphony_drain_token) < 32:
             raise ValueError("SYMPHONY_WORKER_DRAIN_TOKEN must contain at least 32 characters")
         self.minimum = int(os.getenv("MIN_WORKERS", "1"))
-        self.maximum = int(os.getenv("MAX_WORKERS", "5"))
+        self.maximum = int(os.getenv("MAX_WORKERS", "10"))
         self.agents_per_worker = int(os.getenv("AGENTS_PER_WORKER", "1"))
         self.cooldown_seconds = int(os.getenv("SCALE_DOWN_COOLDOWN_SECONDS", "1200"))
         self.tracker_demand_max_age_seconds = int(

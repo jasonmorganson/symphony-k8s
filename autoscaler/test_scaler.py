@@ -181,7 +181,7 @@ class UsageLedgerTest(unittest.TestCase):
 
 class DesiredWorkersTest(unittest.TestCase):
     def test_capacity_bands(self):
-        cases = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 99: 5}
+        cases = {0: 0, 1: 1, 5: 5, 10: 10, 99: 10}
         for issues, expected in cases.items():
             with self.subTest(issues=issues):
                 self.assertEqual(desired_workers(issues), expected)
