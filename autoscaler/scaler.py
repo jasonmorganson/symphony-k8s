@@ -263,7 +263,7 @@ def load_requester_policy(path):
     with open(path, encoding="utf-8") as source:
         policy = json.load(source)
     top_level_keys = {
-        "schema_version", "repository", "machine_login", "runtime_scope",
+        "$schema", "schema_version", "repository", "machine_login", "runtime_scope",
         "requester", "pull_request", "approval_handoff", "monitor",
     }
     if not isinstance(policy, dict) or set(policy) != top_level_keys:
@@ -293,6 +293,7 @@ def load_requester_policy(path):
             raise ValueError(f"invalid requester policy structure: {field}")
     reconciliation = pull_request["reconciliation"]
     expected = {
+        "$schema": (policy["$schema"], "./requester-policy.schema.json"),
         "schema_version": (policy["schema_version"], 1),
         "repository": (policy["repository"], "withAutograph/arrusted-development"),
         "machine_login": (policy["machine_login"], "autograph-symphony"),

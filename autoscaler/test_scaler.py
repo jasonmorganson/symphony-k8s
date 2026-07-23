@@ -13,6 +13,7 @@ from scaler import (ApprovalHandoff, Scaler, UsageLedger, desired_workers,
 
 def requester_policy():
     return {
+        "$schema": "./requester-policy.schema.json",
         "schema_version": 1,
         "repository": "withAutograph/arrusted-development",
         "machine_login": "autograph-symphony",
@@ -448,7 +449,8 @@ class ApprovalHandoffTest(unittest.TestCase):
         for mutate in (
                 "state", "mapping", "extra", "nested_extra", "repository",
                 "machine_login", "runtime_scope", "reconciliation",
-                "boolean_version", "boolean_pr_count", "malformed_email"):
+                "schema_reference", "boolean_version", "boolean_pr_count",
+                "malformed_email"):
             with self.subTest(mutate=mutate), tempfile.TemporaryDirectory() as directory:
                 policy = requester_policy()
                 policy.pop("_requester_by_email")
@@ -458,13 +460,15 @@ class ApprovalHandoffTest(unittest.TestCase):
                     policy["requester"]["creator_email_mappings"].append(
                         dict(policy["requester"]["creator_email_mappings"][0]))
                 elif mutate == "extra":
-                    policy["$schema"] = "./requester-policy.schema.json"
+                    policy["unexpected"] = True
                 elif mutate == "nested_extra":
                     policy["approval_handoff"]["unexpected"] = True
                 elif mutate in ("repository", "machine_login", "runtime_scope"):
                     policy[mutate] = "wrong"
                 elif mutate == "reconciliation":
                     policy["pull_request"]["reconciliation"]["one"] = "replace"
+                elif mutate == "schema_reference":
+                    policy["$schema"] = "./wrong.schema.json"
                 elif mutate == "boolean_version":
                     policy["schema_version"] = True
                 elif mutate == "boolean_pr_count":
@@ -477,6 +481,22 @@ class ApprovalHandoffTest(unittest.TestCase):
                     json.dump(policy, target)
                 with self.assertRaises(ValueError):
                     load_requester_policy(path)
+
+    def test_policy_loader_accepts_canonical_schema_bound_policy(self):
+        policy = requester_policy()
+        policy.pop("_requester_by_email")
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "policy.json")
+            with open(path, "w", encoding="utf-8") as target:
+                json.dump(policy, target)
+            loaded = load_requester_policy(path)
+        self.assertEqual(loaded["$schema"], "./requester-policy.schema.json")
+        self.assertEqual(loaded["repository"], "withAutograph/arrusted-development")
+        self.assertEqual(loaded["approval_handoff"]["source_state"], "In Review")
+        self.assertEqual(
+            loaded["_requester_by_email"],
+            {"jason@withgraph.com": "jasonmorganson"},
+        )
 
     def test_a210_shape_uses_only_one_open_machine_pull_request(self):
         pulls = {
