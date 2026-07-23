@@ -51,6 +51,12 @@ if [[ "$*" == *" get deployment "* ]]; then
   exit 0
 fi
 
+if [[ "$*" == *" get statefulset symphony-worker "* ]] &&
+    [[ "$*" == *"jsonpath={.spec.replicas}"* ]]; then
+  printf '%s' "${WORKER_REPLICAS:-2}"
+  exit 0
+fi
+
 if [[ "$*" == *" get statefulset symphony-worker "* ]]; then
   printf '%s' "$WORKER_IMAGE"
   exit 0
@@ -80,6 +86,9 @@ if [[ "${KUSTOMIZE_ERROR:-0}" == "1" ]]; then
   exit 1
 fi
 if [[ "${1:-}" == "build" ]]; then
+  worker_replicas="$(awk '/^  replicas: / { print $2; exit }' \
+    "$2/single-node-worker-patch.yaml")"
+  printf 'build worker_replicas=%s\n' "$worker_replicas" >> "$KUSTOMIZE_LOG"
   orchestrator="${ORCHESTRATOR_IMAGE:-ghcr.io/example/orchestrator@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
   worker="${WORKER_IMAGE:-ghcr.io/example/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
   autoscaler="${AUTOSCALER_IMAGE:-ghcr.io/example/autoscaler@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}"
@@ -159,6 +168,8 @@ grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$WORKER_IMAGE" "$KUSTOMIZE_LO
 grep -F "ghcr.io/jasonmorganson/symphony-k8s-autoscaler=$AUTOSCALER_IMAGE" "$KUSTOMIZE_LOG"
 grep -F "apply --dry-run=client -f " "$KUBECTL_LOG"
 grep -F "apply -f " "$KUBECTL_LOG"
+grep -F -- "-n symphony get statefulset symphony-worker -o jsonpath={.spec.replicas}" "$KUBECTL_LOG"
+grep -F "build worker_replicas=2" "$KUSTOMIZE_LOG"
 grep -F "annotate --overwrite deployment/symphony-orchestrator deployment/symphony-autoscaler statefulset/symphony-worker symphony.morganson.me/source-revision=$SOURCE_REVISION" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-orchestrator --timeout=10m" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-autoscaler --timeout=10m" "$KUBECTL_LOG"
@@ -168,6 +179,10 @@ for deployment in coredns konnectivity-agent hubble-relay hubble-ui; do
   grep -F -- "-n kube-system rollout status deployment/$deployment --timeout=5m" "$KUBECTL_LOG"
 done
 grep -F '"doks.digitalocean.com/node-pool":"durable-system"' "$KUBECTL_LOG"
+
+reset_logs
+WORKER_REPLICAS=7 run_deploy
+grep -F "build worker_replicas=7" "$KUSTOMIZE_LOG"
 
 reset_logs
 DOKS_REFRESH_KUBECONFIG=true run_deploy

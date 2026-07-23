@@ -158,6 +158,7 @@ refresh_kubeconfig
 required_addons=(coredns konnectivity-agent)
 optional_addons=(hubble-relay hubble-ui)
 addons=()
+live_worker_replicas=""
 
 for deployment in "${required_addons[@]}"; do
   resource="$("$KUBECTL" -n kube-system get deployment "$deployment" --ignore-not-found -o name)"
@@ -174,12 +175,27 @@ for deployment in "${optional_addons[@]}"; do
   fi
 done
 
+if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
+  live_worker_replicas="$("$KUBECTL" -n symphony get statefulset symphony-worker \
+    -o jsonpath='{.spec.replicas}')"
+  require_nonnegative_integer "live Symphony worker replicas" "$live_worker_replicas"
+fi
+
 TEMP_DIR="$(mktemp -d)"
 render_root="$TEMP_DIR/k8s"
 cp -R "$ROOT_DIR/k8s" "$render_root"
 render_target="$render_root/digitalocean"
 if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "true" ]]; then
   render_target="$render_root"
+else
+  worker_patch="$render_root/digitalocean/single-node-worker-patch.yaml"
+  preserved_worker_patch="$TEMP_DIR/single-node-worker-patch.yaml"
+  sed "s/^  replicas: [0-9][0-9]*$/  replicas: $live_worker_replicas/" \
+    "$worker_patch" > "$preserved_worker_patch"
+  mv "$preserved_worker_patch" "$worker_patch"
+  if [[ "$(grep -Ec "^  replicas: $live_worker_replicas$" "$worker_patch")" != "1" ]]; then
+    fail "unable to preserve live Symphony worker replicas"
+  fi
 fi
 
 if (( image_override_count == 3 )); then
