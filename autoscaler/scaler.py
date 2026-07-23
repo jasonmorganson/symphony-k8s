@@ -900,10 +900,12 @@ class Scaler:
             acknowledgement = self.at_stage(
                 "symphony_drains", self.set_worker_drains, configured_hosts[ready:])
             drained_count = len(acknowledgement["drained_hosts"])
-            if not acknowledgement["active_drained_hosts"]:
-                self.at_stage("kubernetes_scale_write", self.set_workers, target, resource_version)
-                current = target
-                self.low_demand_since = None
+            # Durable retries may already reserve a future StatefulSet ordinal.
+            # Keep the future hosts drained while their pods start, but create
+            # the capacity needed to service those reservations.
+            self.at_stage("kubernetes_scale_write", self.set_workers, target, resource_version)
+            current = target
+            self.low_demand_since = None
         elif target < current:
             if busy:
                 self.low_demand_since = None
