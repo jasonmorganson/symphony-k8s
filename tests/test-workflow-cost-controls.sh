@@ -6,6 +6,8 @@ worker_patch="$ROOT_DIR/k8s/digitalocean/single-node-worker-patch.yaml"
 worker_statefulset="$ROOT_DIR/k8s/base/worker-statefulset.yaml"
 runtime="$ROOT_DIR/config/workflow-runtime.yaml"
 generator="$ROOT_DIR/scripts/generate-skaffold-inputs.sh"
+autoscaler="$ROOT_DIR/k8s/digitalocean/autoscaler.yaml"
+kustomization="$ROOT_DIR/k8s/base/kustomization.yaml"
 
 grep -q '^worker:$' "$runtime"
 grep -q 'symphony-worker-4.symphony-worker.symphony.svc.cluster.local' "$runtime"
@@ -16,6 +18,20 @@ grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$r
 grep -q 'workflow_body=.*awk' "$generator"
 grep -q "SYMPHONY_WORKFLOW_FILE" "$generator"
 grep -q 'SYMPHONY_WORKER_DRAIN_TOKEN' "$generator"
+grep -q 'requester-policy.json' "$generator"
+grep -q 'workflow-source.json' "$generator"
+grep -q 'SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE' "$generator"
+grep -q 'requester-policy.json=generated/skaffold/workflow/requester-policy.json' "$kustomization"
+grep -q 'workflow-source.json=generated/skaffold/workflow/workflow-source.json' "$kustomization"
+grep -A4 'name: GITHUB_TOKEN' "$autoscaler" | grep -q 'name: github-machine-arrusted-symphony'
+grep -A2 'name: REQUESTER_POLICY_PATH' "$autoscaler" | \
+  grep -q '/etc/symphony-workflow/requester-policy.json'
+grep -A1 'name: POLL_INTERVAL_SECONDS' "$autoscaler" | grep -q 'value: "15"'
+grep -A5 'name: workflow$' "$autoscaler" | grep -q 'requester-policy.json'
+if grep -A8 '^  active_states:' "$runtime" | grep -q 'In Review'; then
+  echo "In Review must remain passive and absent from tracker.active_states" >&2
+  exit 1
+fi
 
 if grep -q '^## ' "$runtime"; then
   echo "runtime front matter must not fork canonical behavioral instructions" >&2

@@ -5,8 +5,54 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr
 from unittest import mock
-from scaler import (Scaler, UsageLedger, desired_workers, issue_is_runnable, metrics_lines,
+from scaler import (ApprovalHandoff, Scaler, UsageLedger, desired_workers, issue_is_runnable,
+                    load_requester_policy, metrics_lines, requester_approval_is_current,
                     stable_session_id, worker_pool_activity)
+
+
+def requester_policy():
+    return {
+        "$schema": "./requester-policy.schema.json",
+        "schema_version": 1,
+        "repository": "withAutograph/arrusted-development",
+        "machine_login": "autograph-symphony",
+        "runtime_scope": ["kubernetes"],
+        "requester": {
+            "source": "linear_issue_creator",
+            "resolution": "exactly_one_mapping_or_fail_closed",
+            "creator_email_mappings": [{
+                "linear_creator_email": "jason@withgraph.com",
+                "github_login": "jasonmorganson",
+            }],
+        },
+        "pull_request": {
+            "attached_open_count": 1,
+            "author": "machine_login",
+            "reconciliation": {
+                "none": "create", "one": "reuse_and_repair", "ambiguous": "fail_closed"},
+            "required_body_metadata": [
+                "requester", "canonical_linear_issue_link", "exactly_one_fixes_issue_id"],
+            "review_request": "mapped_requester_on_create_or_reuse",
+        },
+        "approval_handoff": {
+            "source_state": "In Review",
+            "destination_state": "Merging",
+            "review_pull_request": "attached_open_pull_request",
+            "actor": "mapped_requester",
+            "actor_type": "human",
+            "state": "APPROVED",
+            "latest_by": "submitted_at",
+            "ignored_review_states": ["COMMENTED"],
+            "conflicting_latest_timestamp": "fail_closed",
+            "concurrent_state_drift": "fail_closed",
+        },
+        "monitor": {
+            "owner": "existing_workflow_monitor",
+            "polling": "existing_monitor_loop",
+            "github_credential": "github-machine-arrusted-symphony",
+        },
+        "_requester_by_email": {"jason@withgraph.com": "jasonmorganson"},
+    }
 
 
 class UsageLedgerTest(unittest.TestCase):
@@ -429,6 +475,163 @@ class CurrentWorkersTest(unittest.TestCase):
                 self.scaler_with_response(response).current_workers()
 
 
+class ApprovalHandoffTest(unittest.TestCase):
+    def setUp(self):
+        self.policy = requester_policy()
+        self.handoff = ApprovalHandoff(
+            "arrusted", "linear", "github", self.policy, mock.Mock(), wall_clock=lambda: 1000)
+        self.issue = {
+            "id": "issue-210",
+            "identifier": "A-210",
+            "creator": {"email": "jason@withgraph.com"},
+            "state": {"name": "In Review"},
+            "attachments": {
+                "nodes": [
+                    {"url": "https://github.com/withAutograph/arrusted-development/pull/504"},
+                    {"url": "https://github.com/withAutograph/arrusted-development/pull/494"},
+                ],
+                "pageInfo": {"hasNextPage": False},
+            },
+        }
+        self.approval = {
+            "user": {"login": "jasonmorganson", "type": "User"},
+            "state": "APPROVED",
+            "submitted_at": "2026-07-23T16:00:12Z",
+        }
+
+    def test_policy_loader_rejects_stale_review_state_and_duplicate_mapping(self):
+        for mutate in ("state", "mapping"):
+            with self.subTest(mutate=mutate), tempfile.TemporaryDirectory() as directory:
+                policy = requester_policy()
+                policy.pop("_requester_by_email")
+                if mutate == "state":
+                    policy["approval_handoff"]["source_state"] = "Human Review"
+                else:
+                    policy["requester"]["creator_email_mappings"].append(
+                        dict(policy["requester"]["creator_email_mappings"][0]))
+                path = os.path.join(directory, "policy.json")
+                with open(path, "w", encoding="utf-8") as target:
+                    json.dump(policy, target)
+                with self.assertRaises(ValueError):
+                    load_requester_policy(path)
+
+    def test_a210_shape_uses_only_one_open_machine_pull_request(self):
+        pulls = {
+            504: {"state": "open", "user": {"login": "autograph-symphony"}},
+            494: {"state": "closed", "merged": True,
+                  "user": {"login": "autograph-symphony"}},
+        }
+        self.handoff.github = lambda path: pulls[int(path.rsplit("/", 1)[1])]
+        self.assertEqual(self.handoff.open_machine_pull_request(self.issue), 504)
+
+    def test_wrong_repository_user_authored_and_multiple_open_prs_fail_closed(self):
+        wrong_repository = {
+            **self.issue,
+            "attachments": {"nodes": [
+                {"url": "https://github.com/elsewhere/repository/pull/504"}],
+                "pageInfo": {"hasNextPage": False}},
+        }
+        self.assertIsNone(self.handoff.open_machine_pull_request(wrong_repository))
+
+        self.handoff.github = lambda _path: {
+            "state": "open", "user": {"login": "jasonmorganson"}}
+        self.assertIsNone(self.handoff.open_machine_pull_request(self.issue))
+
+        self.handoff.github = lambda _path: {
+            "state": "open", "user": {"login": "autograph-symphony"}}
+        issue = {
+            **self.issue,
+            "attachments": {"nodes": [
+                {"url": "https://github.com/withAutograph/arrusted-development/pull/504"},
+                {"url": "https://github.com/withAutograph/arrusted-development/pull/505"},
+            ], "pageInfo": {"hasNextPage": False}},
+        }
+        self.assertIsNone(self.handoff.open_machine_pull_request(issue))
+
+    def test_effective_requester_approval_positive_and_negative_cases(self):
+        self.assertTrue(requester_approval_is_current(
+            [self.approval], 504, "jasonmorganson"))
+        later_comment = {
+            **self.approval, "state": "COMMENTED", "submitted_at": "2026-07-23T17:00:00Z"}
+        self.assertTrue(requester_approval_is_current(
+            [later_comment, self.approval], 504, "jasonmorganson"))
+
+        cases = {
+            "no approval": [],
+            "wrong actor": [{**self.approval, "user": {
+                "login": "someone-else", "type": "User"}}],
+            "bot actor": [{**self.approval, "user": {
+                "login": "jasonmorganson", "type": "Bot"}}],
+            "wrong pull request": [{**self.approval, "pull_request_number": 507}],
+            "later change request": [self.approval, {
+                **self.approval, "state": "CHANGES_REQUESTED",
+                "submitted_at": "2026-07-23T17:00:00Z"}],
+            "later dismissal": [self.approval, {
+                **self.approval, "state": "DISMISSED",
+                "submitted_at": "2026-07-23T17:00:00Z"}],
+            "conflicting timestamp": [self.approval, {
+                **self.approval, "state": "CHANGES_REQUESTED"}],
+            "malformed timestamp": [{**self.approval, "submitted_at": "not-a-time"}],
+            "impossible timestamp": [{
+                **self.approval, "submitted_at": "2026-02-30T12:00:00Z"}],
+        }
+        for label, reviews in cases.items():
+            with self.subTest(label=label):
+                self.assertFalse(requester_approval_is_current(
+                    reviews, 504, "jasonmorganson"))
+
+    def test_reviews_are_paginated(self):
+        first = [{**self.approval, "id": index} for index in range(100)]
+        self.handoff.github = mock.Mock(side_effect=[first, [self.approval]])
+        self.assertEqual(len(self.handoff.reviews(504)), 101)
+        self.assertIn("page=2", self.handoff.github.call_args_list[1].args[0])
+
+    def test_in_review_issue_query_is_paginated(self):
+        issue_229 = {**self.issue, "id": "issue-229", "identifier": "A-229"}
+        self.handoff.linear = mock.Mock(side_effect=[
+            {"issues": {"nodes": [self.issue],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "next"}}},
+            {"issues": {"nodes": [issue_229],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None}}},
+        ])
+        self.assertEqual(
+            [issue["identifier"] for issue in self.handoff.review_issues()],
+            ["A-210", "A-229"])
+        self.assertEqual(self.handoff.linear.call_args_list[1].args[1]["after"], "next")
+
+    def test_concurrent_state_drift_prevents_mutation_and_repeat_is_idempotent(self):
+        self.handoff.open_machine_pull_request = mock.Mock(return_value=504)
+        self.handoff.reviews = mock.Mock(return_value=[self.approval])
+        self.handoff.fresh_state_and_destination = mock.Mock(
+            side_effect=["merging-state", None])
+        self.handoff.transition = mock.Mock()
+        self.assertEqual(self.handoff.reconcile_issue(self.issue), "transitioned")
+        self.assertEqual(self.handoff.reconcile_issue(self.issue), "state_drift")
+        self.handoff.transition.assert_called_once_with("issue-210", "merging-state")
+
+    def test_unapproved_a229_remains_in_review(self):
+        issue = {**self.issue, "id": "issue-229", "identifier": "A-229"}
+        self.handoff.open_machine_pull_request = mock.Mock(return_value=507)
+        self.handoff.reviews = mock.Mock(return_value=[])
+        self.handoff.transition = mock.Mock()
+        self.assertEqual(self.handoff.reconcile_issue(issue), "requester_not_approved")
+        self.handoff.transition.assert_not_called()
+
+    def test_one_issue_failure_does_not_block_later_issue_or_recovery(self):
+        issue_229 = {**self.issue, "id": "issue-229", "identifier": "A-229"}
+        self.handoff.review_issues = mock.Mock(return_value=iter([self.issue, issue_229]))
+        self.handoff.reconcile_issue = mock.Mock(
+            side_effect=[RuntimeError("github unavailable"), "transitioned"])
+        with redirect_stderr(io.StringIO()):
+            outcomes = self.handoff.reconcile()
+        self.assertEqual(outcomes, {"observed": 2, "transitioned": 1, "failed": 1})
+
+        self.handoff.review_issues.return_value = iter([self.issue])
+        self.handoff.reconcile_issue.side_effect = ["transitioned"]
+        self.assertEqual(
+            self.handoff.reconcile(), {"observed": 1, "transitioned": 1, "failed": 0})
+
+
 class FakeScaler(Scaler):
     def __init__(self):
         self.clock = 0
@@ -502,6 +705,50 @@ class FakeScaler(Scaler):
 
 
 class ReconcileTest(unittest.TestCase):
+    def test_handoff_initialization_failures_leave_capacity_operational_and_retry(self):
+        for label, loader, environment in (
+            ("malformed policy", mock.Mock(side_effect=ValueError("bad policy")),
+             {"GITHUB_TOKEN": "github"}),
+            ("missing token", mock.Mock(return_value=requester_policy()), {}),
+        ):
+            with self.subTest(label=label):
+                scaler = FakeScaler()
+                scaler.project_slug = "arrusted"
+                scaler.linear_key = "linear"
+                scaler.request_json = mock.Mock()
+                with mock.patch("scaler.load_requester_policy", loader), \
+                        mock.patch.dict(os.environ, environment, clear=True), \
+                        redirect_stderr(io.StringIO()):
+                    scaler.initialize_approval_handoff()
+                    scaler.run_once()
+                self.assertIsNone(scaler.approval_handoff)
+                self.assertEqual(scaler.metrics["healthy"], 1)
+                self.assertEqual(scaler.metrics["errors"], 0)
+                self.assertEqual(scaler.metrics["handoff_failures"], 2)
+                self.assertEqual(loader.call_count, 2)
+
+    def test_handoff_failure_does_not_fail_capacity_reconciliation(self):
+        scaler = FakeScaler()
+        scaler.approval_handoff = mock.Mock()
+        scaler.approval_handoff.reconcile.side_effect = RuntimeError("github unavailable")
+        with redirect_stderr(io.StringIO()):
+            scaler.run_once()
+        self.assertEqual(scaler.metrics["healthy"], 1)
+        self.assertEqual(scaler.metrics["handoff_failures"], 1)
+        self.assertEqual(scaler.metrics["errors"], 0)
+
+    def test_capacity_failure_does_not_prevent_handoff_reconciliation(self):
+        scaler = FakeScaler()
+        scaler.fail = True
+        scaler.approval_handoff = mock.Mock()
+        scaler.approval_handoff.reconcile.return_value = {
+            "observed": 2, "transitioned": 1, "failed": 0}
+        with redirect_stderr(io.StringIO()):
+            scaler.run_once()
+        scaler.approval_handoff.reconcile.assert_called_once_with()
+        self.assertEqual(scaler.metrics["handoff_transitions"], 1)
+        self.assertEqual(scaler.metrics["healthy"], 0)
+
     def test_scales_up_immediately(self):
         scaler = FakeScaler()
         scaler.issues = 13

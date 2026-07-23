@@ -46,6 +46,34 @@ if [[ ! -f "$runtime_file" ]]; then
   printf 'Missing Kubernetes workflow runtime configuration: %s\n' "$runtime_file" >&2
   exit 1
 fi
+workflow_repository="$(git -C "$(dirname "$workflow_file")" rev-parse --show-toplevel)"
+policy_file="$workflow_repository/.config/symphony/requester-policy.json"
+if [[ ! -f "$policy_file" ]]; then
+  printf 'Missing canonical requester policy: %s\n' "$policy_file" >&2
+  exit 1
+fi
+if [[ "${SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE:-0}" == "1" ]]; then
+  if [[ "$(git -C "$workflow_repository" branch --show-current)" != "main" ]]; then
+    printf 'Canonical workflow source must be checked out on main: %s\n' "$workflow_repository" >&2
+    exit 1
+  fi
+  if [[ -n "$(git -C "$workflow_repository" status --porcelain=v1)" ]]; then
+    printf 'Canonical workflow source must be clean: %s\n' "$workflow_repository" >&2
+    exit 1
+  fi
+  git -C "$workflow_repository" fetch origin main --quiet
+  if [[ "$(git -C "$workflow_repository" rev-parse HEAD)" != \
+        "$(git -C "$workflow_repository" rev-parse origin/main)" ]]; then
+    printf 'Canonical workflow source is stale relative to origin/main: %s\n' \
+      "$workflow_repository" >&2
+    exit 1
+  fi
+fi
+workflow_revision="$(git -C "$workflow_repository" rev-parse HEAD)"
+if grep -Fq 'Human Review' "$workflow_file" || ! grep -Fq 'In Review' "$workflow_file"; then
+  printf 'Canonical workflow must contain In Review and no Human Review: %s\n' "$workflow_file" >&2
+  exit 1
+fi
 
 orchestrator_key="$ssh_dir/orchestrator_id_ed25519"
 worker_host_key="$ssh_dir/ssh_host_ed25519_key"
@@ -97,3 +125,7 @@ if [[ -z "$workflow_body" ]]; then
 fi
 
 write_if_changed "$workflow_dir/WORKFLOW.md" "$(printf '%s\n%s\n%s\n%s' '---' "$(cat "$runtime_file")" '---' "$workflow_body")"
+cp "$policy_file" "$workflow_dir/requester-policy.json"
+write_if_changed "$workflow_dir/workflow-source.json" "$(printf \
+  '{"repository":"%s","revision":"%s","workflow":"WORKFLOW.md","requester_policy":".config/symphony/requester-policy.json"}' \
+  "$(git -C "$workflow_repository" config --get remote.origin.url)" "$workflow_revision")"
