@@ -60,22 +60,13 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: autoscaler
-          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:421cde7a4b697af6494001d6fb3823de5f66f12b13c5dfe60808424620f3acb0
+          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:06665383e8ad8bf2c83af0233a222c654698fadd74935fe1d35e4f559c101200
           imagePullPolicy: Always
           env:
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # Retained until this manifest pins an autoscaler image containing
-            # the Symphony tracker-demand consumer.
-            - name: LINEAR_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: symphony-secrets
-                  key: LINEAR_API_KEY
-            - name: LINEAR_PROJECT_SLUG
-              value: arrusted-development-71c3d9986f6d
             - name: SYMPHONY_WORKER_DRAIN_TOKEN
               valueFrom:
                 secretKeyRef:
