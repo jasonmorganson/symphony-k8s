@@ -189,10 +189,9 @@ would add a separate monthly charge.
 
 ### Demand-based autoscaling
 
-The updated `symphony-autoscaler` polls Symphony every 60 seconds and uses
-the orchestrator's cached tracker observation; it does not make independent
-Linear requests or read the compatibility credentials retained for the currently
-pinned image. Remove those variables when the new autoscaler digest is pinned. Symphony counts routable active issues,
+The `symphony-autoscaler` polls Symphony every 60 seconds and uses the
+orchestrator's cached tracker observation; it does not make independent Linear
+requests or receive a Linear token. Symphony counts routable active issues,
 including required-label and assignee rules, and reports blocked candidates
 separately. Zero runnable issues requests zero workers;
 active work requests one worker for each runnable issue, bounded to one through
