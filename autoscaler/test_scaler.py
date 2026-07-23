@@ -12,11 +12,10 @@ from scaler import (ApprovalHandoff, Scaler, UsageLedger, desired_workers, issue
 
 def requester_policy():
     return {
-        "$schema": "./requester-policy.schema.json",
         "schema_version": 1,
         "repository": "withAutograph/arrusted-development",
         "machine_login": "autograph-symphony",
-        "runtime_scope": ["kubernetes"],
+        "runtime_scope": ["local", "vm", "container", "kubernetes"],
         "requester": {
             "source": "linear_issue_creator",
             "resolution": "exactly_one_mapping_or_fail_closed",
@@ -499,16 +498,34 @@ class ApprovalHandoffTest(unittest.TestCase):
             "submitted_at": "2026-07-23T16:00:12Z",
         }
 
-    def test_policy_loader_rejects_stale_review_state_and_duplicate_mapping(self):
-        for mutate in ("state", "mapping"):
+    def test_policy_loader_rejects_contract_drift(self):
+        for mutate in (
+                "state", "mapping", "extra", "nested_extra", "repository",
+                "machine_login", "runtime_scope", "reconciliation",
+                "boolean_version", "boolean_pr_count", "malformed_email"):
             with self.subTest(mutate=mutate), tempfile.TemporaryDirectory() as directory:
                 policy = requester_policy()
                 policy.pop("_requester_by_email")
                 if mutate == "state":
                     policy["approval_handoff"]["source_state"] = "Human Review"
-                else:
+                elif mutate == "mapping":
                     policy["requester"]["creator_email_mappings"].append(
                         dict(policy["requester"]["creator_email_mappings"][0]))
+                elif mutate == "extra":
+                    policy["$schema"] = "./requester-policy.schema.json"
+                elif mutate == "nested_extra":
+                    policy["approval_handoff"]["unexpected"] = True
+                elif mutate in ("repository", "machine_login", "runtime_scope"):
+                    policy[mutate] = "wrong"
+                elif mutate == "reconciliation":
+                    policy["pull_request"]["reconciliation"]["one"] = "replace"
+                elif mutate == "boolean_version":
+                    policy["schema_version"] = True
+                elif mutate == "boolean_pr_count":
+                    policy["pull_request"]["attached_open_count"] = True
+                else:
+                    policy["requester"]["creator_email_mappings"][0][
+                        "linear_creator_email"] = "@"
                 path = os.path.join(directory, "policy.json")
                 with open(path, "w", encoding="utf-8") as target:
                     json.dump(policy, target)

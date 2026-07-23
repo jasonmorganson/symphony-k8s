@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import re
 import ssl
 import sys
 import tempfile
@@ -263,11 +264,11 @@ def worker_pool_activity(state, current_workers, statefulset="symphony-worker"):
 def load_requester_policy(path):
     with open(path, encoding="utf-8") as source:
         policy = json.load(source)
-    required = {
-        "$schema", "schema_version", "repository", "machine_login", "runtime_scope",
+    top_level_keys = {
+        "schema_version", "repository", "machine_login", "runtime_scope",
         "requester", "pull_request", "approval_handoff", "monitor",
     }
-    if not isinstance(policy, dict) or set(policy) != required or policy["schema_version"] != 1:
+    if not isinstance(policy, dict) or set(policy) != top_level_keys:
         raise ValueError("unsupported requester policy")
     requester = policy["requester"]
     pull_request = policy["pull_request"]
@@ -275,12 +276,45 @@ def load_requester_policy(path):
     monitor = policy["monitor"]
     if not all(isinstance(value, dict) for value in (requester, pull_request, handoff, monitor)):
         raise ValueError("invalid requester policy sections")
+    structures = (
+        ("requester", requester, {
+            "source", "resolution", "creator_email_mappings"}),
+        ("pull_request", pull_request, {
+            "attached_open_count", "author", "reconciliation",
+            "required_body_metadata", "review_request"}),
+        ("pull_request.reconciliation", pull_request.get("reconciliation"), {
+            "none", "one", "ambiguous"}),
+        ("approval_handoff", handoff, {
+            "source_state", "destination_state", "review_pull_request", "actor",
+            "actor_type", "state", "latest_by", "ignored_review_states",
+            "conflicting_latest_timestamp", "concurrent_state_drift"}),
+        ("monitor", monitor, {"owner", "polling", "github_credential"}),
+    )
+    for field, value, expected_keys in structures:
+        if not isinstance(value, dict) or set(value) != expected_keys:
+            raise ValueError(f"invalid requester policy structure: {field}")
+    reconciliation = pull_request["reconciliation"]
     expected = {
+        "schema_version": (policy["schema_version"], 1),
+        "repository": (policy["repository"], "withAutograph/arrusted-development"),
+        "machine_login": (policy["machine_login"], "autograph-symphony"),
+        "runtime_scope": (
+            policy["runtime_scope"], ["local", "vm", "container", "kubernetes"]),
         "requester.source": (requester.get("source"), "linear_issue_creator"),
         "requester.resolution": (
             requester.get("resolution"), "exactly_one_mapping_or_fail_closed"),
         "pull_request.attached_open_count": (pull_request.get("attached_open_count"), 1),
         "pull_request.author": (pull_request.get("author"), "machine_login"),
+        "pull_request.reconciliation.none": (reconciliation.get("none"), "create"),
+        "pull_request.reconciliation.one": (
+            reconciliation.get("one"), "reuse_and_repair"),
+        "pull_request.reconciliation.ambiguous": (
+            reconciliation.get("ambiguous"), "fail_closed"),
+        "pull_request.required_body_metadata": (
+            pull_request.get("required_body_metadata"),
+            ["requester", "canonical_linear_issue_link", "exactly_one_fixes_issue_id"]),
+        "pull_request.review_request": (
+            pull_request.get("review_request"), "mapped_requester_on_create_or_reuse"),
         "approval_handoff.source_state": (handoff.get("source_state"), "In Review"),
         "approval_handoff.destination_state": (handoff.get("destination_state"), "Merging"),
         "approval_handoff.review_pull_request": (
@@ -301,14 +335,10 @@ def load_requester_policy(path):
             monitor.get("github_credential"), "github-machine-arrusted-symphony"),
     }
     for field, (actual, wanted) in expected.items():
-        if actual != wanted:
+        if type(actual) is not type(wanted) or actual != wanted:
             raise ValueError(f"unsupported requester policy value: {field}")
-    repository = policy["repository"]
-    machine_login = policy["machine_login"]
     mappings = requester.get("creator_email_mappings")
-    if not isinstance(repository, str) or repository.count("/") != 1 \
-            or not isinstance(machine_login, str) or not machine_login \
-            or not isinstance(mappings, list) or not mappings:
+    if not isinstance(mappings, list) or not mappings:
         raise ValueError("invalid requester policy identity")
     normalized = {}
     for mapping in mappings:
@@ -317,7 +347,7 @@ def load_requester_policy(path):
             raise ValueError("invalid requester mapping")
         email = mapping["linear_creator_email"]
         login = mapping["github_login"]
-        if not isinstance(email, str) or "@" not in email \
+        if not isinstance(email, str) or re.fullmatch(r"[^@\s]+@[^@\s]+", email) is None \
                 or not isinstance(login, str) or not login or email in normalized:
             raise ValueError("ambiguous requester mapping")
         normalized[email] = login
