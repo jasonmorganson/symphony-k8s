@@ -20,11 +20,25 @@ fi
 EOF
 chmod +x "$TEMP_DIR/kubectl"
 
+cat > "$TEMP_DIR/doctl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCTL_LOG"
+if [[ "${DOCTL_ERROR:-0}" == "1" ]]; then
+  exit 1
+fi
+EOF
+chmod +x "$TEMP_DIR/doctl"
+
 export KUBECTL_LOG="$TEMP_DIR/kubectl.log"
+export DOCTL_LOG="$TEMP_DIR/doctl.log"
 KUBECTL="$TEMP_DIR/kubectl" \
+  DOCTL="$TEMP_DIR/doctl" \
+  DOKS_CLUSTER=production-cluster \
   SYMPHONY_SYSTEM_NODE_POOL=durable-system \
+  SYMPHONY_WORKER_NODE_POOL=worker-pool \
   bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"
 
+grep -F "kubernetes cluster node-pool update production-cluster worker-pool --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
 grep -F "apply -k $ROOT_DIR/k8s/digitalocean" "$KUBECTL_LOG"
 for deployment in coredns konnectivity-agent hubble-relay hubble-ui; do
   grep -F -- "-n kube-system patch deployment $deployment --type=strategic" "$KUBECTL_LOG"
@@ -34,9 +48,12 @@ grep -F '"doks.digitalocean.com/node-pool":"durable-system"' "$KUBECTL_LOG"
 grep -F '"key":"symphony.morganson.me/workload"' "$KUBECTL_LOG"
 
 : > "$KUBECTL_LOG"
+: > "$DOCTL_LOG"
 KUBECTL="$TEMP_DIR/kubectl" \
+  DOCTL="$TEMP_DIR/doctl" \
   MISSING_DEPLOYMENTS=hubble-relay,hubble-ui \
   bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"
+grep -F "kubernetes cluster node-pool update symphony-k8s symphony-ha --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
 for deployment in coredns konnectivity-agent; do
   grep -F -- "-n kube-system patch deployment $deployment --type=strategic" "$KUBECTL_LOG"
 done
@@ -46,7 +63,9 @@ if grep -F -- "patch deployment hubble-" "$KUBECTL_LOG"; then
 fi
 
 : > "$KUBECTL_LOG"
+: > "$DOCTL_LOG"
 if KUBECTL="$TEMP_DIR/kubectl" MISSING_DEPLOYMENTS=coredns \
+    DOCTL="$TEMP_DIR/doctl" \
     bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
   echo "missing required deployment must fail preflight" >&2
   exit 1
@@ -55,14 +74,49 @@ if grep -F "apply -k" "$KUBECTL_LOG"; then
   echo "overlay must not be applied after failed preflight" >&2
   exit 1
 fi
+if [[ -s "$DOCTL_LOG" ]]; then
+  echo "node pool must not be changed after failed preflight" >&2
+  exit 1
+fi
 
 : > "$KUBECTL_LOG"
+: > "$DOCTL_LOG"
 if KUBECTL="$TEMP_DIR/kubectl" API_ERROR_DEPLOYMENTS=hubble-relay \
+    DOCTL="$TEMP_DIR/doctl" \
     bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
   echo "optional deployment API errors must fail preflight" >&2
   exit 1
 fi
 if grep -F "apply -k" "$KUBECTL_LOG"; then
   echo "overlay must not be applied after an optional deployment API error" >&2
+  exit 1
+fi
+if [[ -s "$DOCTL_LOG" ]]; then
+  echo "node pool must not be changed after an optional deployment API error" >&2
+  exit 1
+fi
+
+: > "$KUBECTL_LOG"
+: > "$DOCTL_LOG"
+if KUBECTL="$TEMP_DIR/kubectl" DOCTL="$TEMP_DIR/doctl" DOCTL_ERROR=1 \
+    bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
+  echo "node-pool reconciliation errors must fail deployment" >&2
+  exit 1
+fi
+if grep -F "apply -k" "$KUBECTL_LOG"; then
+  echo "overlay must not be applied after failed node-pool reconciliation" >&2
+  exit 1
+fi
+
+: > "$KUBECTL_LOG"
+: > "$DOCTL_LOG"
+if KUBECTL="$TEMP_DIR/kubectl" DOCTL="$TEMP_DIR/doctl" \
+    SYMPHONY_WORKER_MIN_NODES=11 SYMPHONY_WORKER_MAX_NODES=10 \
+    bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
+  echo "invalid node-pool bounds must fail deployment" >&2
+  exit 1
+fi
+if [[ -s "$KUBECTL_LOG" || -s "$DOCTL_LOG" ]]; then
+  echo "invalid node-pool bounds must fail before provider or cluster access" >&2
   exit 1
 fi
