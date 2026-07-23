@@ -7,7 +7,7 @@ worker_statefulset="$ROOT_DIR/k8s/base/worker-statefulset.yaml"
 runtime="$ROOT_DIR/config/workflow-runtime.yaml"
 generator="$ROOT_DIR/scripts/generate-skaffold-inputs.sh"
 autoscaler="$ROOT_DIR/k8s/digitalocean/autoscaler.yaml"
-kustomization="$ROOT_DIR/k8s/base/kustomization.yaml"
+kustomization="$ROOT_DIR/k8s/kustomization.yaml"
 
 grep -q '^worker:$' "$runtime"
 grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$runtime"
@@ -23,8 +23,8 @@ grep -q 'SYMPHONY_WORKER_DRAIN_TOKEN' "$generator"
 grep -q 'requester-policy.json' "$generator"
 grep -q 'workflow-source.json' "$generator"
 grep -q 'SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE' "$generator"
-grep -q 'requester-policy.json=generated/skaffold/workflow/requester-policy.json' "$kustomization"
-grep -q 'workflow-source.json=generated/skaffold/workflow/workflow-source.json' "$kustomization"
+grep -q 'requester-policy.json=base/generated/skaffold/workflow/requester-policy.json' "$kustomization"
+grep -q 'workflow-source.json=base/generated/skaffold/workflow/workflow-source.json' "$kustomization"
 grep -A4 'name: GITHUB_TOKEN' "$autoscaler" | grep -q 'name: github-machine-arrusted-symphony'
 grep -A2 'name: REQUESTER_POLICY_PATH' "$autoscaler" | \
   grep -q '/etc/symphony-workflow/requester-policy.json'

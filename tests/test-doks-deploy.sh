@@ -1,33 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
-
-ROOT_DIR="$TEMP_DIR/symphony-k8s"
-mkdir -p "$ROOT_DIR"
-(
-  cd "$SOURCE_ROOT"
-  tar --exclude=.git --exclude=k8s/base/generated -cf - .
-) | (
-  cd "$ROOT_DIR"
-  tar -xf -
-)
-git init -b master "$ROOT_DIR" >/dev/null
-git -C "$ROOT_DIR" config user.name "Test"
-git -C "$ROOT_DIR" config user.email "test@example.com"
-git -C "$ROOT_DIR" config commit.gpgsign false
-git -C "$ROOT_DIR" add .
-git -C "$ROOT_DIR" commit -m "test symphony deployment" >/dev/null
-SYMPHONY_REMOTE="$TEMP_DIR/symphony.git"
-git init --bare "$SYMPHONY_REMOTE" >/dev/null
-git -C "$ROOT_DIR" remote add origin "$SYMPHONY_REMOTE"
-git -C "$ROOT_DIR" push -u origin master >/dev/null
 
 cat > "$TEMP_DIR/kubectl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$KUBECTL_LOG"
+
+if [[ "$*" == "get --raw "* ]]; then
+  case "${STATE_MODE:-idle}" in
+    idle)
+      printf '%s\n' '{"running":[],"retrying":[]}'
+      ;;
+    busy)
+      printf '%s\n' '{"running":[{"issue_identifier":"A-230"}],"retrying":[]}'
+      ;;
+    busy_then_idle)
+      count=0
+      if [[ -f "$STATE_COUNT_FILE" ]]; then
+        count="$(cat "$STATE_COUNT_FILE")"
+      fi
+      count=$((count + 1))
+      printf '%s\n' "$count" > "$STATE_COUNT_FILE"
+      if (( count == 1 )); then
+        printf '%s\n' '{"running":[{"issue_identifier":"A-230"}],"retrying":[]}'
+      else
+        printf '%s\n' '{"running":[],"retrying":[{"issue_identifier":"A-211"}]}'
+      fi
+      ;;
+    invalid)
+      printf '%s\n' '{"running":"not-an-array"}'
+      ;;
+    unavailable)
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
 if [[ "$*" == *" get deployment "* ]]; then
   deployment="${5}"
   if [[ ",${API_ERROR_DEPLOYMENTS:-}," == *",$deployment,"* ]]; then
@@ -36,18 +48,21 @@ if [[ "$*" == *" get deployment "* ]]; then
   if [[ ",${MISSING_DEPLOYMENTS:-}," != *",$deployment,"* ]]; then
     printf 'deployment.apps/%s\n' "$deployment"
   fi
+  exit 0
+fi
+
+if [[ "$*" == *" get statefulset symphony-worker "* ]]; then
+  printf '%s' "$WORKER_IMAGE"
+  exit 0
+fi
+
+if [[ "$*" == *" rollout status "* ]] &&
+    [[ -n "${KUBECTL_FAIL_ROLLOUT:-}" ]] &&
+    [[ "$*" == *"$KUBECTL_FAIL_ROLLOUT"* ]]; then
+  exit 1
 fi
 EOF
 chmod +x "$TEMP_DIR/kubectl"
-cat > "$TEMP_DIR/docker" <<'EOF'
-#!/usr/bin/env bash
-if [[ "$*" != *"symphony-k8s-autoscaler:${EXPECTED_SYMPHONY_REVISION}"* ]]; then
-  echo "missing revision tag" >&2
-  exit 1
-fi
-printf '"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n'
-EOF
-chmod +x "$TEMP_DIR/docker"
 
 cat > "$TEMP_DIR/doctl" <<'EOF'
 #!/usr/bin/env bash
@@ -58,368 +73,195 @@ fi
 EOF
 chmod +x "$TEMP_DIR/doctl"
 
+cat > "$TEMP_DIR/kustomize" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$KUSTOMIZE_LOG"
+if [[ "${KUSTOMIZE_ERROR:-0}" == "1" ]]; then
+  exit 1
+fi
+if [[ "${1:-}" == "build" ]]; then
+  orchestrator="${ORCHESTRATOR_IMAGE:-ghcr.io/example/orchestrator@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
+  worker="${WORKER_IMAGE:-ghcr.io/example/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
+  autoscaler="${AUTOSCALER_IMAGE:-ghcr.io/example/autoscaler@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}"
+  printf '%s\n' \
+    'apiVersion: apps/v1' \
+    'kind: Deployment' \
+    'metadata:' \
+    '  name: symphony-orchestrator' \
+    'spec:' \
+    '  template:' \
+    '    spec:' \
+    '      containers:' \
+    '        - name: orchestrator' \
+    "          image: $orchestrator" \
+    '---' \
+    'apiVersion: apps/v1' \
+    'kind: StatefulSet' \
+    'metadata:' \
+    '  name: symphony-worker' \
+    'spec:' \
+    '  template:' \
+    '    spec:' \
+    '      containers:' \
+    '        - name: worker' \
+    "          image: $worker" \
+    '---' \
+    'apiVersion: apps/v1' \
+    'kind: Deployment' \
+    'metadata:' \
+    '  name: symphony-autoscaler' \
+    'spec:' \
+    '  template:' \
+    '    spec:' \
+    '      containers:' \
+    '        - name: autoscaler' \
+    "          image: $autoscaler"
+fi
+EOF
+chmod +x "$TEMP_DIR/kustomize"
+
 export KUBECTL_LOG="$TEMP_DIR/kubectl.log"
 export DOCTL_LOG="$TEMP_DIR/doctl.log"
-SOURCE_REMOTE="$TEMP_DIR/arrusted.git"
-SOURCE_REPO="$TEMP_DIR/arrusted-development"
-git init --bare "$SOURCE_REMOTE" >/dev/null
-git init -b main "$SOURCE_REPO" >/dev/null
-git -C "$SOURCE_REPO" config user.name "Test"
-git -C "$SOURCE_REPO" config user.email "test@example.com"
-git -C "$SOURCE_REPO" config commit.gpgsign false
-mkdir -p "$SOURCE_REPO/.config/symphony"
-cat > "$SOURCE_REPO/WORKFLOW.md" <<'EOF'
----
-tracker:
-  active_states:
-    - Todo
----
-# Test workflow
+export KUSTOMIZE_LOG="$TEMP_DIR/kustomize.log"
+export STATE_COUNT_FILE="$TEMP_DIR/state-count"
 
-Human Review moves to Merging after requester approval.
-EOF
-cat > "$SOURCE_REPO/.config/symphony/requester-policy.json" <<'EOF'
-{
-  "$schema": "./requester-policy.schema.json",
-  "schema_version": 1,
-  "repository": "withAutograph/arrusted-development",
-  "machine_login": "autograph-symphony",
-  "runtime_scope": ["local", "vm", "container", "kubernetes"],
-  "requester": {
-    "source": "linear_issue_creator",
-    "resolution": "exactly_one_mapping_or_fail_closed",
-    "creator_email_mappings": [
-      {
-        "linear_creator_email": "jason@withgraph.com",
-        "github_login": "jasonmorganson"
-      }
-    ]
-  },
-  "pull_request": {
-    "attached_open_count": 1,
-    "author": "machine_login",
-    "reconciliation": {
-      "none": "create",
-      "one": "reuse_and_repair",
-      "ambiguous": "fail_closed"
-    },
-    "required_body_metadata": [
-      "requester",
-      "canonical_linear_issue_link",
-      "exactly_one_fixes_issue_id"
-    ],
-    "review_request": "mapped_requester_on_create_or_reuse"
-  },
-  "approval_handoff": {
-    "source_state": "Human Review",
-    "destination_state": "Merging",
-    "review_pull_request": "attached_open_pull_request",
-    "actor": "mapped_requester",
-    "actor_type": "human",
-    "state": "APPROVED",
-    "latest_by": "submitted_at",
-    "ignored_review_states": ["COMMENTED"],
-    "conflicting_latest_timestamp": "fail_closed",
-    "concurrent_state_drift": "fail_closed"
-  },
-  "monitor": {
-    "owner": "existing_workflow_monitor",
-    "polling": "existing_monitor_loop",
-    "discovery": "github_open_machine_pull_requests",
-    "linear_access": "approved_candidates_only",
-    "github_credential": "github-machine-arrusted-symphony"
-  }
+ORCHESTRATOR_IMAGE="ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+WORKER_IMAGE="ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+AUTOSCALER_IMAGE="ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+SOURCE_REVISION="dddddddddddddddddddddddddddddddddddddddd"
+export ORCHESTRATOR_IMAGE WORKER_IMAGE AUTOSCALER_IMAGE SOURCE_REVISION
+
+reset_logs() {
+  : > "$KUBECTL_LOG"
+  : > "$DOCTL_LOG"
+  : > "$KUSTOMIZE_LOG"
+  rm -f "$STATE_COUNT_FILE"
 }
-EOF
-git -C "$SOURCE_REPO" add WORKFLOW.md .config/symphony/requester-policy.json
-git -C "$SOURCE_REPO" commit -m "test workflow" >/dev/null
-git -C "$SOURCE_REPO" remote add origin "$SOURCE_REMOTE"
-git -C "$SOURCE_REPO" push -u origin main >/dev/null
 
-export LINEAR_API_KEY=test-linear
-export OPENAI_API_KEY=test-openai
-export SYMPHONY_WORKER_DRAIN_TOKEN=01234567890123456789012345678901
-export SYMPHONY_WORKFLOW_FILE="$SOURCE_REPO/WORKFLOW.md"
-export SYMPHONY_IMAGE_INSPECTOR="$TEMP_DIR/docker"
-export EXPECTED_SYMPHONY_REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
-export KUSTOMIZE=kubectl
+run_deploy() {
+  KUBECTL="$TEMP_DIR/kubectl" \
+    KUSTOMIZE="$TEMP_DIR/kustomize" \
+    DOCTL="$TEMP_DIR/doctl" \
+    SYMPHONY_IDLE_POLL_SECONDS=0 \
+    bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"
+}
 
-KUBECTL="$TEMP_DIR/kubectl" \
-  DOCTL="$TEMP_DIR/doctl" \
-  DOKS_CLUSTER=production-cluster \
+reset_logs
+DOKS_CLUSTER=production-cluster \
   SYMPHONY_SYSTEM_NODE_POOL=durable-system \
   SYMPHONY_WORKER_NODE_POOL=worker-pool \
-  bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"
+  run_deploy
 
-kubectl kustomize "$ROOT_DIR/k8s/digitalocean" > "$TEMP_DIR/rendered.yaml"
-grep -q 'requester-policy.json:' "$TEMP_DIR/rendered.yaml"
-grep -q 'workflow-source.json:' "$TEMP_DIR/rendered.yaml"
-source_revision="$(git -C "$SOURCE_REPO" rev-parse HEAD)"
-grep -q "\"revision\":\"$source_revision\"" "$TEMP_DIR/rendered.yaml"
-grep -q 'Human Review' "$TEMP_DIR/rendered.yaml"
-if grep -q 'In Review' "$TEMP_DIR/rendered.yaml"; then
-  echo "rendered workflow ConfigMap must not contain In Review" >&2
-  exit 1
-fi
-workflow_config_name="$(
-  sed -n 's/^  name: \(symphony-workflow-[a-z0-9]*\)$/\1/p' "$TEMP_DIR/rendered.yaml" | head -1
-)"
-if [[ -z "$workflow_config_name" ]] || \
-    [[ "$(grep -c "name: $workflow_config_name" "$TEMP_DIR/rendered.yaml")" -lt 3 ]]; then
-  echo "content-addressed workflow ConfigMap must roll and mount in both deployments" >&2
-  exit 1
-fi
-grep -A5 'name: GITHUB_TOKEN' "$TEMP_DIR/rendered.yaml" | \
-  grep -q 'name: github-machine-arrusted-symphony'
+grep -F "get --raw /api/v1/namespaces/symphony/services/http:symphony-orchestrator:4000/proxy/api/v1/state" "$KUBECTL_LOG"
 grep -F "kubernetes cluster node-pool update production-cluster worker-pool --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
+grep -F "edit set image nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator=$ORCHESTRATOR_IMAGE" "$KUSTOMIZE_LOG"
+grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$WORKER_IMAGE" "$KUSTOMIZE_LOG"
+grep -F "ghcr.io/jasonmorganson/symphony-k8s-autoscaler=$AUTOSCALER_IMAGE" "$KUSTOMIZE_LOG"
+grep -F "apply --dry-run=client -f " "$KUBECTL_LOG"
 grep -F "apply -f " "$KUBECTL_LOG"
+grep -F "annotate --overwrite deployment/symphony-orchestrator deployment/symphony-autoscaler statefulset/symphony-worker symphony.morganson.me/source-revision=$SOURCE_REVISION" "$KUBECTL_LOG"
+grep -F -- "-n symphony rollout status deployment/symphony-orchestrator --timeout=10m" "$KUBECTL_LOG"
+grep -F -- "-n symphony rollout status deployment/symphony-autoscaler --timeout=10m" "$KUBECTL_LOG"
+grep -F -- "-n symphony get statefulset symphony-worker -o jsonpath=" "$KUBECTL_LOG"
 for deployment in coredns konnectivity-agent hubble-relay hubble-ui; do
   grep -F -- "-n kube-system patch deployment $deployment --type=strategic" "$KUBECTL_LOG"
   grep -F -- "-n kube-system rollout status deployment/$deployment --timeout=5m" "$KUBECTL_LOG"
 done
 grep -F '"doks.digitalocean.com/node-pool":"durable-system"' "$KUBECTL_LOG"
-grep -F '"key":"symphony.morganson.me/workload"' "$KUBECTL_LOG"
 
-python3 - "$SOURCE_REPO/.config/symphony/requester-policy.json" <<'PY'
-import json
-import sys
+reset_logs
+DOKS_REFRESH_KUBECONFIG=true run_deploy
+grep -F "kubernetes cluster kubeconfig save --expiry-seconds 600 symphony-k8s" "$DOCTL_LOG"
+[[ "$(grep -Fc "kubernetes cluster kubeconfig save --expiry-seconds 600 symphony-k8s" "$DOCTL_LOG")" -ge 7 ]]
 
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    policy = json.load(source)
-policy["approval_handoff"]["source_state"] = "In Review"
-with open(path, "w", encoding="utf-8") as target:
-    json.dump(policy, target)
-PY
-git -C "$SOURCE_REPO" add .config/symphony/requester-policy.json
-git -C "$SOURCE_REPO" commit -m "stale requester policy" >/dev/null
-git -C "$SOURCE_REPO" push origin main >/dev/null
-: > "$KUBECTL_LOG"
-: > "$DOCTL_LOG"
-if bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
-  echo "stale requester policy must fail preflight" >&2
-  exit 1
-fi
-if ! cmp -s "$SOURCE_REPO/.config/symphony/requester-policy.json" \
-    "$ROOT_DIR/k8s/base/generated/skaffold/workflow/requester-policy.json"; then
-  echo "preflight must validate the exact copied requester policy" >&2
-  exit 1
-fi
-if grep -F "apply -f" "$KUBECTL_LOG" || [[ -s "$DOCTL_LOG" ]]; then
-  echo "stale requester policy must fail before provider mutation" >&2
-  exit 1
-fi
-python3 - "$SOURCE_REPO/.config/symphony/requester-policy.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    policy = json.load(source)
-policy["approval_handoff"]["source_state"] = "Human Review"
-with open(path, "w", encoding="utf-8") as target:
-    json.dump(policy, target)
-PY
-git -C "$SOURCE_REPO" add .config/symphony/requester-policy.json
-git -C "$SOURCE_REPO" commit -m "restore requester policy" >/dev/null
-git -C "$SOURCE_REPO" push origin main >/dev/null
-
-cp "$SOURCE_REPO/.config/symphony/requester-policy.json" "$TEMP_DIR/valid-requester-policy.json"
-python3 - "$SOURCE_REPO/.config/symphony/requester-policy.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    policy = json.load(source)
-del policy["monitor"]
-with open(path, "w", encoding="utf-8") as target:
-    json.dump(policy, target)
-PY
-git -C "$SOURCE_REPO" add .config/symphony/requester-policy.json
-git -C "$SOURCE_REPO" commit -m "malformed requester policy" >/dev/null
-git -C "$SOURCE_REPO" push origin main >/dev/null
-: > "$KUBECTL_LOG"
-: > "$DOCTL_LOG"
-if bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
-  echo "malformed requester policy must fail preflight" >&2
-  exit 1
-fi
-if ! cmp -s "$SOURCE_REPO/.config/symphony/requester-policy.json" \
-    "$ROOT_DIR/k8s/base/generated/skaffold/workflow/requester-policy.json"; then
-  echo "preflight must validate the exact copied requester policy" >&2
-  exit 1
-fi
-if grep -F "apply -f" "$KUBECTL_LOG" || [[ -s "$DOCTL_LOG" ]]; then
-  echo "malformed requester policy must fail before provider mutation" >&2
-  exit 1
-fi
-cp "$TEMP_DIR/valid-requester-policy.json" \
-  "$SOURCE_REPO/.config/symphony/requester-policy.json"
-git -C "$SOURCE_REPO" add .config/symphony/requester-policy.json
-git -C "$SOURCE_REPO" commit -m "restore valid requester policy" >/dev/null
-git -C "$SOURCE_REPO" push origin main >/dev/null
-
-cat > "$TEMP_DIR/bad-docker" <<'EOF'
-#!/usr/bin/env bash
-printf '"not-a-digest"\n'
-EOF
-chmod +x "$TEMP_DIR/bad-docker"
-: > "$KUBECTL_LOG"
-if SYMPHONY_IMAGE_INSPECTOR="$TEMP_DIR/bad-docker" \
-    bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
-  echo "missing merged-revision image digest must fail preflight" >&2
-  exit 1
-fi
-if grep -F "apply -f" "$KUBECTL_LOG"; then
-  echo "invalid autoscaler image must fail before apply" >&2
-  exit 1
-fi
-
-printf '\nDirty\n' >> "$ROOT_DIR/README.md"
-: > "$KUBECTL_LOG"
-if bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
-  echo "dirty symphony-k8s source must fail preflight" >&2
-  exit 1
-fi
-if grep -F "apply -f" "$KUBECTL_LOG"; then
-  echo "dirty symphony-k8s source must fail before apply" >&2
-  exit 1
-fi
-git -C "$ROOT_DIR" restore README.md
-
-git -C "$ROOT_DIR" switch -c feature >/dev/null
-: > "$KUBECTL_LOG"
-if bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
-  echo "non-master symphony-k8s source must fail preflight" >&2
-  exit 1
-fi
-if grep -F "apply -f" "$KUBECTL_LOG"; then
-  echo "non-master symphony-k8s source must fail before apply" >&2
-  exit 1
-fi
-git -C "$ROOT_DIR" switch master >/dev/null
-
-: > "$KUBECTL_LOG"
-: > "$DOCTL_LOG"
-KUBECTL="$TEMP_DIR/kubectl" \
-  DOCTL="$TEMP_DIR/doctl" \
-  MISSING_DEPLOYMENTS=hubble-relay,hubble-ui \
-  bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"
+reset_logs
+STATE_MODE=busy_then_idle run_deploy
+[[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "2" ]]
 grep -F "kubernetes cluster node-pool update symphony-k8s symphony-ha --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
-for deployment in coredns konnectivity-agent; do
-  grep -F -- "-n kube-system patch deployment $deployment --type=strategic" "$KUBECTL_LOG"
-done
-if grep -F -- "patch deployment hubble-" "$KUBECTL_LOG"; then
-  echo "disabled optional Hubble deployments must not be patched" >&2
+
+reset_logs
+if STATE_MODE=busy SYMPHONY_IDLE_TIMEOUT_SECONDS=0 run_deploy; then
+  echo "busy Symphony must fail at the idle deadline" >&2
+  exit 1
+fi
+[[ ! -s "$DOCTL_LOG" ]]
+if grep -F "apply " "$KUBECTL_LOG"; then
+  echo "busy Symphony must fail before applying resources" >&2
   exit 1
 fi
 
-: > "$KUBECTL_LOG"
-: > "$DOCTL_LOG"
-if KUBECTL="$TEMP_DIR/kubectl" MISSING_DEPLOYMENTS=coredns \
-    DOCTL="$TEMP_DIR/doctl" \
-    bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
+for state_mode in invalid unavailable; do
+  reset_logs
+  if STATE_MODE="$state_mode" run_deploy; then
+    echo "$state_mode Symphony state must fail closed" >&2
+    exit 1
+  fi
+  [[ ! -s "$DOCTL_LOG" ]]
+done
+
+reset_logs
+if MISSING_DEPLOYMENTS=coredns run_deploy; then
   echo "missing required deployment must fail preflight" >&2
   exit 1
 fi
-if grep -F "apply -f" "$KUBECTL_LOG"; then
+[[ ! -s "$DOCTL_LOG" ]]
+if grep -F "apply " "$KUBECTL_LOG"; then
   echo "overlay must not be applied after failed preflight" >&2
   exit 1
 fi
-if [[ -s "$DOCTL_LOG" ]]; then
-  echo "node pool must not be changed after failed preflight" >&2
-  exit 1
-fi
 
-: > "$KUBECTL_LOG"
-: > "$DOCTL_LOG"
-if KUBECTL="$TEMP_DIR/kubectl" API_ERROR_DEPLOYMENTS=hubble-relay \
-    DOCTL="$TEMP_DIR/doctl" \
-    bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
+reset_logs
+if API_ERROR_DEPLOYMENTS=hubble-relay run_deploy; then
   echo "optional deployment API errors must fail preflight" >&2
   exit 1
 fi
-if grep -F "apply -f" "$KUBECTL_LOG"; then
-  echo "overlay must not be applied after an optional deployment API error" >&2
+[[ ! -s "$DOCTL_LOG" ]]
+
+reset_logs
+if KUSTOMIZE_ERROR=1 run_deploy; then
+  echo "render errors must fail deployment" >&2
   exit 1
 fi
-if [[ -s "$DOCTL_LOG" ]]; then
-  echo "node pool must not be changed after an optional deployment API error" >&2
+[[ ! -s "$DOCTL_LOG" ]]
+if grep -F "apply " "$KUBECTL_LOG"; then
+  echo "render errors must fail before applying resources" >&2
   exit 1
 fi
 
-: > "$KUBECTL_LOG"
-: > "$DOCTL_LOG"
-if KUBECTL="$TEMP_DIR/kubectl" DOCTL="$TEMP_DIR/doctl" DOCTL_ERROR=1 \
-    bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
+reset_logs
+if DOCTL_ERROR=1 run_deploy; then
   echo "node-pool reconciliation errors must fail deployment" >&2
   exit 1
 fi
-if grep -F "apply -k" "$KUBECTL_LOG"; then
-  echo "overlay must not be applied after failed node-pool reconciliation" >&2
+if grep -F "apply -f " "$KUBECTL_LOG"; then
+  echo "provider failure must occur before the real apply" >&2
   exit 1
 fi
 
-: > "$KUBECTL_LOG"
-: > "$DOCTL_LOG"
-if KUBECTL="$TEMP_DIR/kubectl" DOCTL="$TEMP_DIR/doctl" \
-    SYMPHONY_WORKER_MIN_NODES=11 SYMPHONY_WORKER_MAX_NODES=10 \
-    bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
+reset_logs
+if SYMPHONY_WORKER_MIN_NODES=11 SYMPHONY_WORKER_MAX_NODES=10 run_deploy; then
   echo "invalid node-pool bounds must fail deployment" >&2
   exit 1
 fi
-if [[ -s "$KUBECTL_LOG" || -s "$DOCTL_LOG" ]]; then
-  echo "invalid node-pool bounds must fail before provider or cluster access" >&2
-  exit 1
-fi
+[[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" ]]
 
-printf '\nDirty\n' >> "$SOURCE_REPO/WORKFLOW.md"
-if SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE=1 \
-    bash "$ROOT_DIR/scripts/generate-skaffold-inputs.sh"; then
-  echo "dirty workflow source must fail preflight" >&2
+reset_logs
+saved_autoscaler="$AUTOSCALER_IMAGE"
+unset AUTOSCALER_IMAGE
+if run_deploy; then
+  echo "partial image overrides must fail deployment" >&2
   exit 1
 fi
-git -C "$SOURCE_REPO" restore WORKFLOW.md
+export AUTOSCALER_IMAGE="$saved_autoscaler"
+[[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" ]]
 
-git -C "$SOURCE_REPO" switch -c feature >/dev/null
-if SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE=1 \
-    bash "$ROOT_DIR/scripts/generate-skaffold-inputs.sh"; then
-  echo "non-main workflow source must fail preflight" >&2
+reset_logs
+if KUBECTL_FAIL_ROLLOUT=symphony-autoscaler run_deploy; then
+  echo "failed workload rollout must fail deployment" >&2
   exit 1
 fi
-git -C "$SOURCE_REPO" switch main >/dev/null
+grep -F -- "-n symphony get deployment,statefulset,pods -o wide" "$KUBECTL_LOG"
+grep -F -- "-n symphony describe deployment symphony-orchestrator" "$KUBECTL_LOG"
+grep -F -- "-n symphony describe deployment symphony-autoscaler" "$KUBECTL_LOG"
 
-ADVANCE_REPO="$TEMP_DIR/advance"
-git clone --branch main "$SOURCE_REMOTE" "$ADVANCE_REPO" >/dev/null
-git -C "$ADVANCE_REPO" config user.name "Test"
-git -C "$ADVANCE_REPO" config user.email "test@example.com"
-git -C "$ADVANCE_REPO" config commit.gpgsign false
-printf '\nRemote change\n' >> "$ADVANCE_REPO/WORKFLOW.md"
-git -C "$ADVANCE_REPO" add WORKFLOW.md
-git -C "$ADVANCE_REPO" commit -m "advance workflow" >/dev/null
-git -C "$ADVANCE_REPO" push origin main >/dev/null
-if SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE=1 \
-    bash "$ROOT_DIR/scripts/generate-skaffold-inputs.sh"; then
-  echo "stale workflow source must fail preflight" >&2
-  exit 1
-fi
-
-SYMPHONY_ADVANCE="$TEMP_DIR/symphony-advance"
-git clone --branch master "$SYMPHONY_REMOTE" "$SYMPHONY_ADVANCE" >/dev/null
-git -C "$SYMPHONY_ADVANCE" config user.name "Test"
-git -C "$SYMPHONY_ADVANCE" config user.email "test@example.com"
-git -C "$SYMPHONY_ADVANCE" config commit.gpgsign false
-printf '\nRemote change\n' >> "$SYMPHONY_ADVANCE/README.md"
-git -C "$SYMPHONY_ADVANCE" add README.md
-git -C "$SYMPHONY_ADVANCE" commit -m "advance deployment" >/dev/null
-git -C "$SYMPHONY_ADVANCE" push origin master >/dev/null
-: > "$KUBECTL_LOG"
-if bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"; then
-  echo "stale symphony-k8s source must fail preflight" >&2
-  exit 1
-fi
-if grep -F "apply -f" "$KUBECTL_LOG"; then
-  echo "stale symphony-k8s source must fail before apply" >&2
-  exit 1
-fi
+echo "DOKS deployment tests passed"

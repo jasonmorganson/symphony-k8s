@@ -16,30 +16,6 @@ resources:
   - worker-pdb.yaml
   - networkpolicy.yaml
 
-configMapGenerator:
-  - name: symphony-workflow
-    files:
-      - WORKFLOW.md=generated/skaffold/workflow/WORKFLOW.md
-      - requester-policy.json=generated/skaffold/workflow/requester-policy.json
-      - workflow-source.json=generated/skaffold/workflow/workflow-source.json
-
-secretGenerator:
-  - name: symphony-secrets
-    envs:
-      - generated/skaffold/secrets/symphony-secrets.env
-  - name: symphony-orchestrator-ssh
-    files:
-      - id_ed25519=generated/skaffold/ssh/orchestrator_id_ed25519
-      - known_hosts=generated/skaffold/ssh/known_hosts
-      - config=generated/skaffold/ssh/config
-  - name: symphony-worker-authorized-keys
-    files:
-      - authorized_keys=generated/skaffold/ssh/orchestrator_id_ed25519.pub
-  - name: symphony-worker-hostkeys
-    files:
-      - ssh_host_ed25519_key=generated/skaffold/ssh/ssh_host_ed25519_key
-      - ssh_host_ed25519_key.pub=generated/skaffold/ssh/ssh_host_ed25519_key.pub
-
 images:
   - name: symphony-orchestrator
     newName: nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator
