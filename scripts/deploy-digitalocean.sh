@@ -5,7 +5,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KUBECTL="${KUBECTL:-kubectl}"
 KUSTOMIZE="${KUSTOMIZE:-kubectl}"
 IMAGE_INSPECTOR="${SYMPHONY_IMAGE_INSPECTOR:-docker}"
+DOCTL="${DOCTL:-doctl}"
+DOKS_CLUSTER="${DOKS_CLUSTER:-symphony-k8s}"
 SYSTEM_POOL="${SYMPHONY_SYSTEM_NODE_POOL:-symphony-system}"
+WORKER_POOL="${SYMPHONY_WORKER_NODE_POOL:-symphony-ha}"
+WORKER_MIN_NODES="${SYMPHONY_WORKER_MIN_NODES:-0}"
+WORKER_MAX_NODES="${SYMPHONY_WORKER_MAX_NODES:-10}"
+
+if [[ ! "$WORKER_MIN_NODES" =~ ^[0-9]+$ ]] ||
+    [[ ! "$WORKER_MAX_NODES" =~ ^[0-9]+$ ]] ||
+    (( WORKER_MAX_NODES < WORKER_MIN_NODES )); then
+  echo "invalid worker node-pool bounds: min=$WORKER_MIN_NODES max=$WORKER_MAX_NODES" >&2
+  exit 1
+fi
 
 if [[ "$(git -C "$ROOT_DIR" branch --show-current)" != "master" ]]; then
   echo "symphony-k8s deployment source must be checked out on master" >&2
@@ -56,6 +68,11 @@ for deployment in "${optional_addons[@]}"; do
     addons+=("$deployment")
   fi
 done
+
+"$DOCTL" kubernetes cluster node-pool update "$DOKS_CLUSTER" "$WORKER_POOL" \
+  --auto-scale \
+  --min-nodes "$WORKER_MIN_NODES" \
+  --max-nodes "$WORKER_MAX_NODES"
 
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT

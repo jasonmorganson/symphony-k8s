@@ -10,7 +10,8 @@ autoscaler="$ROOT_DIR/k8s/digitalocean/autoscaler.yaml"
 kustomization="$ROOT_DIR/k8s/base/kustomization.yaml"
 
 grep -q '^worker:$' "$runtime"
-grep -q 'symphony-worker-4.symphony-worker.symphony.svc.cluster.local' "$runtime"
+grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$runtime"
+grep -q '^  max_concurrent_agents: 10$' "$runtime"
 grep -q '^  root: /srv/symphony/workspaces$' "$runtime"
 grep -q 'model_reasoning_effort=medium' "$runtime"
 grep -q 'agents.max_threads=3' "$runtime"
@@ -26,12 +27,15 @@ grep -q 'workflow-source.json=generated/skaffold/workflow/workflow-source.json' 
 grep -A4 'name: GITHUB_TOKEN' "$autoscaler" | grep -q 'name: github-machine-arrusted-symphony'
 grep -A2 'name: REQUESTER_POLICY_PATH' "$autoscaler" | \
   grep -q '/etc/symphony-workflow/requester-policy.json'
+grep -A1 'name: APPROVAL_HANDOFF_RETRY_SECONDS' "$autoscaler" | grep -q 'value: "300"'
 grep -A1 'name: POLL_INTERVAL_SECONDS' "$autoscaler" | grep -q 'value: "60"'
 grep -A5 'name: workflow$' "$autoscaler" | grep -q 'requester-policy.json'
 if grep -A8 '^  active_states:' "$runtime" | grep -q 'In Review'; then
   echo "In Review must remain passive and absent from tracker.active_states" >&2
   exit 1
 fi
+grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$generator"
+grep -A1 'name: MAX_WORKERS' "$ROOT_DIR/k8s/digitalocean/autoscaler.yaml" | grep -q 'value: "10"'
 
 if grep -q '^## ' "$runtime"; then
   echo "runtime front matter must not fork canonical behavioral instructions" >&2

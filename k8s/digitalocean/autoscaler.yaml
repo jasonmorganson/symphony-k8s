@@ -60,7 +60,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: autoscaler
-          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:06665383e8ad8bf2c83af0233a222c654698fadd74935fe1d35e4f559c101200
+          image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:b90c816a1274e78153158d573ed8238cf59356a924936e7ff34d631088ec78de
           imagePullPolicy: Always
           env:
             - name: POD_NAMESPACE
@@ -81,6 +81,8 @@ spec:
                   key: token
             - name: REQUESTER_POLICY_PATH
               value: /etc/symphony-workflow/requester-policy.json
+            - name: APPROVAL_HANDOFF_RETRY_SECONDS
+              value: "300"
             - name: SYMPHONY_WORKER_DRAIN_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -89,7 +91,7 @@ spec:
             - name: MIN_WORKERS
               value: "1"
             - name: MAX_WORKERS
-              value: "5"
+              value: "10"
             - name: AGENTS_PER_WORKER
               value: "1"
             - name: POLL_INTERVAL_SECONDS

@@ -184,7 +184,7 @@ Production uses two separate node pools:
   hosts the orchestrator, demand autoscaler, and Cloudflare connectors, and is
   tainted `symphony.morganson.me/workload=system:NoSchedule`.
 - `symphony-ha` contains only `s-4vcpu-8gb` workers and autos-scales from zero
-  to five nodes. Active worker compute ranges from about $96 to $240/month.
+  to ten nodes. Active worker compute ranges from about $96 to $480/month.
   Each worker reserves 2 vCPU / 4 GiB and may use the node's full 4 vCPU with a
   6 GiB memory limit. The remaining memory is left for Kubernetes and system
   daemons. This prevents Codex plus the full repository gate from being killed
@@ -202,7 +202,7 @@ request. Symphony counts routable active issues, including required-label and
 assignee rules, and reports blocked candidates separately. Zero runnable issues
 requests zero workers;
 active work requests one worker for each runnable issue, bounded to one through
-five workers. Scale-up creates replicas immediately and exposes each worker to
+ten workers. Scale-up creates replicas immediately and exposes each worker to
 Symphony only after its pod is ready. While work is active, scale-down first
 atomically drains trailing scheduler hosts, then removes only replicas above the
 highest running or retrying worker. Fully idle scale-down retains the 20-minute
@@ -214,17 +214,20 @@ after recovery. The aggregate error counter remains available for alerts,
 while `symphony_autoscaler_reconcile_errors_total` attributes failures by stage
 and exception type.
 
-The same loop separately inspects passive `In Review` issues without adding
-that state to Symphony's active-state set. It resolves attached GitHub PRs
-against Arrusted's mounted requester policy, counts only open PRs, requires the
-machine PR author and the mapped Linear creator's current effective human
-`APPROVED` review, freshly verifies the Linear state, and may perform only the
-policy's `In Review` to `Merging` mutation. Review pagination, timestamp
-ordering, conflicting-timestamp fail-closed behavior, and concurrent state
-drift are handled by the monitor. GitHub or handoff failures are logged and
-counted independently of capacity reconciliation through
-`symphony_approval_handoff_transitions_total` and
-`symphony_approval_handoff_failures_total`.
+The same loop handles approvals for passive `In Review` issues without adding
+that state to Symphony's active-state set. Discovery is GitHub-first: it scans
+open pull requests, parses the canonical requester and Linear metadata, and
+checks the mapped requester's current effective human `APPROVED` review. Idle,
+unapproved, user-authored, and malformed candidates make zero Linear requests.
+Only a currently approved candidate causes a fresh Linear issue read. The
+monitor then verifies the creator, project, canonical link, and state, freshly
+rechecks every attached PR plus the requester's review and candidate head, and
+may perform only the policy's `In Review` to `Merging` mutation. Identical
+candidates that cannot transition are deferred for five minutes, bounding
+retries without delaying a new approval or head revision. Candidate,
+Linear-request, deferred, transition, and failure totals are exposed through
+the `symphony_approval_handoff_*` metrics. GitHub and handoff failures remain
+isolated from capacity reconciliation.
 
 The DOKS deploy entrypoint regenerates these inputs only from a clean,
 up-to-date Arrusted `main` checkout. It rejects dirty, non-`main`, or stale
@@ -238,7 +241,7 @@ cannot supply an unrelated or mutable image.
 
 Each worker has strict hostname spreading, so a pending worker makes the DOKS
 Cluster Autoscaler add a node. Configure `symphony-ha` with minimum 0 and
-maximum 5 nodes. StatefulSet PVCs are retained after scale-down so work can
+maximum 10 nodes. StatefulSet PVCs are retained after scale-down so work can
 resume safely; those block-storage volumes continue to incur storage charges.
 The worker StatefulSet uses `OnDelete` updates so manifest or image changes do
 not terminate active SSH sessions. Roll worker ordinals manually only after the
@@ -418,8 +421,8 @@ docker push ghcr.io/jasonmorganson/symphony-k8s-orchestrator:20260712
 docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712
 ```
 
-With `kubectl` configured for the DOKS cluster, generate the ignored inputs and
-run the deployment wrapper:
+With `kubectl` and `doctl` configured for the DOKS cluster, generate the ignored
+inputs and run the deployment wrapper:
 
 ```bash
 bash scripts/generate-skaffold-inputs.sh
@@ -427,12 +430,16 @@ bash scripts/deploy-digitalocean.sh
 rm -rf k8s/base/generated
 ```
 
-The wrapper preflights the required DOKS add-ons, applies the Symphony overlay,
-then idempotently pins CoreDNS and konnectivity plus any enabled Hubble relay/UI
+The wrapper preflights the required DOKS add-ons, reconciles the `symphony-ha`
+pool to autoscaling bounds `0..10`, applies the Symphony overlay, then
+idempotently pins CoreDNS and konnectivity plus any enabled Hubble relay/UI
 deployments to the fixed `symphony-system` pool with its required taint
-toleration. Run the wrapper after every DOKS upgrade as well as every Symphony
-deployment so provider-managed add-on changes cannot leave critical replicas
-stranded on an autoscaled worker node and block scale-to-zero.
+toleration. Override the provider targets with `DOKS_CLUSTER` and
+`SYMPHONY_WORKER_NODE_POOL`; override the bounds with
+`SYMPHONY_WORKER_MIN_NODES` and `SYMPHONY_WORKER_MAX_NODES`. Run the wrapper
+after every DOKS upgrade as well as every Symphony deployment so provider-managed
+add-on changes cannot leave critical replicas stranded on an autoscaled worker
+node and block scale-to-zero.
 
 Never commit or retain `k8s/base/generated`: it temporarily contains plaintext
 secret inputs. Remove the generated directory immediately after the Kubernetes
