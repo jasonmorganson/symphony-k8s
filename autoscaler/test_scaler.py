@@ -245,6 +245,10 @@ class RunnableIssueTest(unittest.TestCase):
         scaler = object.__new__(Scaler)
         scaler.project_slug = "project"
         scaler.linear_key = "key"
+        scaler.now = lambda: 0
+        scaler.linear_rate_limit_cooldown_seconds = 60
+        scaler.linear_cooldown_until = 0
+        scaler.last_linear_counts = None
         pages = iter((
             {"data": {"issues": {"nodes": [
                 {"state": {"name": "In Progress"}, "inverseRelations": {
@@ -263,6 +267,50 @@ class RunnableIssueTest(unittest.TestCase):
 
         self.assertEqual(scaler.linear_issue_count(), (2, 1))
         self.assertEqual(scaler.request_json.call_count, 2)
+
+    def test_linear_rate_limit_reuses_last_count_during_shared_cooldown(self):
+        scaler = object.__new__(Scaler)
+        scaler.project_slug = "project"
+        scaler.linear_key = "key"
+        scaler.clock = 10
+        scaler.now = lambda: scaler.clock
+        scaler.linear_rate_limit_cooldown_seconds = 60
+        scaler.linear_cooldown_until = 0
+        scaler.last_linear_counts = (3, 1)
+        scaler.request_json = mock.Mock(return_value={
+            "errors": [{
+                "message": "Rate limit exceeded.",
+                "extensions": {"code": "RATELIMITED", "statusCode": 429},
+            }],
+        })
+
+        self.assertEqual(scaler.linear_issue_count(), (3, 1))
+        self.assertEqual(scaler.linear_cooldown_until, 70)
+        self.assertEqual(scaler.request_json.call_count, 1)
+
+        scaler.clock = 20
+        self.assertEqual(scaler.linear_issue_count(), (3, 1))
+        self.assertEqual(scaler.request_json.call_count, 1)
+
+    def test_linear_rate_limit_without_cached_count_fails_with_cooldown(self):
+        scaler = object.__new__(Scaler)
+        scaler.project_slug = "project"
+        scaler.linear_key = "key"
+        scaler.now = lambda: 10
+        scaler.linear_rate_limit_cooldown_seconds = 60
+        scaler.linear_cooldown_until = 0
+        scaler.last_linear_counts = None
+        scaler.request_json = mock.Mock(return_value={
+            "errors": [{
+                "extensions": {"code": "RATELIMITED", "statusCode": 429},
+            }],
+        })
+
+        with self.assertRaisesRegex(
+                RuntimeError, "Linear rate limited; shared cooldown has 60s remaining"):
+            scaler.linear_issue_count()
+        self.assertEqual(scaler.linear_cooldown_until, 70)
+        self.assertEqual(scaler.request_json.call_count, 1)
 
 
 class WorkerPoolActivityTest(unittest.TestCase):

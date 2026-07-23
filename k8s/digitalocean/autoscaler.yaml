@@ -86,7 +86,9 @@ spec:
             - name: AGENTS_PER_WORKER
               value: "1"
             - name: POLL_INTERVAL_SECONDS
-              value: "15"
+              value: "60"
+            - name: LINEAR_RATE_LIMIT_COOLDOWN_SECONDS
+              value: "60"
             - name: SCALE_DOWN_COOLDOWN_SECONDS
               value: "1200"
             - name: USAGE_LEDGER_PATH
