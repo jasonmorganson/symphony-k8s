@@ -70,6 +70,11 @@ symphony-worker-1.symphony-worker.symphony.svc.cluster.local $host_key_type $hos
 symphony-worker-2.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
 symphony-worker-3.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
 symphony-worker-4.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
+symphony-worker-5.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
+symphony-worker-6.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
+symphony-worker-7.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
+symphony-worker-8.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
+symphony-worker-9.symphony-worker.symphony.svc.cluster.local $host_key_type $host_key_body
 EOF
 )"
 

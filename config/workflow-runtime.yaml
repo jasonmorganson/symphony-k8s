@@ -24,6 +24,11 @@ worker:
     - symphony-worker-2.symphony-worker.symphony.svc.cluster.local
     - symphony-worker-3.symphony-worker.symphony.svc.cluster.local
     - symphony-worker-4.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-5.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-6.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-7.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-8.symphony-worker.symphony.svc.cluster.local
+    - symphony-worker-9.symphony-worker.symphony.svc.cluster.local
   max_concurrent_agents_per_host: 1
   drain_state_path: /srv/symphony/workspaces/.worker-drains.json
 hooks:
@@ -34,7 +39,7 @@ hooks:
       wt hook post-remove --yes || echo "wt post-remove hook not configured; skipping." >&2
     fi
 agent:
-  max_concurrent_agents: 5
+  max_concurrent_agents: 10
   max_turns: 20
   max_concurrent_agents_by_state:
     Merging: 1

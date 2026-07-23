@@ -8,7 +8,8 @@ runtime="$ROOT_DIR/config/workflow-runtime.yaml"
 generator="$ROOT_DIR/scripts/generate-skaffold-inputs.sh"
 
 grep -q '^worker:$' "$runtime"
-grep -q 'symphony-worker-4.symphony-worker.symphony.svc.cluster.local' "$runtime"
+grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$runtime"
+grep -q '^  max_concurrent_agents: 10$' "$runtime"
 grep -q '^  root: /srv/symphony/workspaces$' "$runtime"
 grep -q 'model_reasoning_effort=medium' "$runtime"
 grep -q 'agents.max_threads=3' "$runtime"
@@ -16,6 +17,8 @@ grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$r
 grep -q 'workflow_body=.*awk' "$generator"
 grep -q "SYMPHONY_WORKFLOW_FILE" "$generator"
 grep -q 'SYMPHONY_WORKER_DRAIN_TOKEN' "$generator"
+grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$generator"
+grep -A1 'name: MAX_WORKERS' "$ROOT_DIR/k8s/digitalocean/autoscaler.yaml" | grep -q 'value: "10"'
 
 if grep -q '^## ' "$runtime"; then
   echo "runtime front matter must not fork canonical behavioral instructions" >&2
