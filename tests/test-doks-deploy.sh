@@ -207,7 +207,7 @@ fi
 git -C "$SOURCE_REPO" switch main >/dev/null
 
 ADVANCE_REPO="$TEMP_DIR/advance"
-git clone "$SOURCE_REMOTE" "$ADVANCE_REPO" >/dev/null
+git clone --branch main "$SOURCE_REMOTE" "$ADVANCE_REPO" >/dev/null
 git -C "$ADVANCE_REPO" config user.name "Test"
 git -C "$ADVANCE_REPO" config user.email "test@example.com"
 git -C "$ADVANCE_REPO" config commit.gpgsign false
