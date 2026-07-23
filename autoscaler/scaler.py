@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import re
 import ssl
 import sys
 import tempfile
@@ -13,6 +14,8 @@ import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+LINEAR_URL = "https://api.linear.app/graphql"
+GITHUB_API_URL = "https://api.github.com"
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens")
 
 
@@ -256,6 +259,478 @@ def worker_pool_activity(state, current_workers, statefulset="symphony-worker"):
     return running_count + retrying_count, floor, configured
 
 
+def load_requester_policy(path):
+    with open(path, encoding="utf-8") as source:
+        policy = json.load(source)
+    top_level_keys = {
+        "$schema", "schema_version", "repository", "machine_login", "runtime_scope",
+        "requester", "pull_request", "approval_handoff", "monitor",
+    }
+    if not isinstance(policy, dict) or set(policy) != top_level_keys:
+        raise ValueError("unsupported requester policy")
+    requester = policy["requester"]
+    pull_request = policy["pull_request"]
+    handoff = policy["approval_handoff"]
+    monitor = policy["monitor"]
+    if not all(isinstance(value, dict) for value in (requester, pull_request, handoff, monitor)):
+        raise ValueError("invalid requester policy sections")
+    structures = (
+        ("requester", requester, {
+            "source", "resolution", "creator_email_mappings"}),
+        ("pull_request", pull_request, {
+            "attached_open_count", "author", "reconciliation",
+            "required_body_metadata", "review_request"}),
+        ("pull_request.reconciliation", pull_request.get("reconciliation"), {
+            "none", "one", "ambiguous"}),
+        ("approval_handoff", handoff, {
+            "source_state", "destination_state", "review_pull_request", "actor",
+            "actor_type", "state", "latest_by", "ignored_review_states",
+            "conflicting_latest_timestamp", "concurrent_state_drift"}),
+        ("monitor", monitor, {
+            "owner", "polling", "discovery", "linear_access", "github_credential"}),
+    )
+    for field, value, expected_keys in structures:
+        if not isinstance(value, dict) or set(value) != expected_keys:
+            raise ValueError(f"invalid requester policy structure: {field}")
+    reconciliation = pull_request["reconciliation"]
+    expected = {
+        "$schema": (policy["$schema"], "./requester-policy.schema.json"),
+        "schema_version": (policy["schema_version"], 1),
+        "repository": (policy["repository"], "withAutograph/arrusted-development"),
+        "machine_login": (policy["machine_login"], "autograph-symphony"),
+        "runtime_scope": (
+            policy["runtime_scope"], ["local", "vm", "container", "kubernetes"]),
+        "requester.source": (requester.get("source"), "linear_issue_creator"),
+        "requester.resolution": (
+            requester.get("resolution"), "exactly_one_mapping_or_fail_closed"),
+        "pull_request.attached_open_count": (pull_request.get("attached_open_count"), 1),
+        "pull_request.author": (pull_request.get("author"), "machine_login"),
+        "pull_request.reconciliation.none": (reconciliation.get("none"), "create"),
+        "pull_request.reconciliation.one": (
+            reconciliation.get("one"), "reuse_and_repair"),
+        "pull_request.reconciliation.ambiguous": (
+            reconciliation.get("ambiguous"), "fail_closed"),
+        "pull_request.required_body_metadata": (
+            pull_request.get("required_body_metadata"),
+            ["requester", "canonical_linear_issue_link", "exactly_one_fixes_issue_id"]),
+        "pull_request.review_request": (
+            pull_request.get("review_request"), "mapped_requester_on_create_or_reuse"),
+        "approval_handoff.source_state": (handoff.get("source_state"), "Human Review"),
+        "approval_handoff.destination_state": (handoff.get("destination_state"), "Merging"),
+        "approval_handoff.review_pull_request": (
+            handoff.get("review_pull_request"), "attached_open_pull_request"),
+        "approval_handoff.actor": (handoff.get("actor"), "mapped_requester"),
+        "approval_handoff.actor_type": (handoff.get("actor_type"), "human"),
+        "approval_handoff.state": (handoff.get("state"), "APPROVED"),
+        "approval_handoff.latest_by": (handoff.get("latest_by"), "submitted_at"),
+        "approval_handoff.ignored_review_states": (
+            handoff.get("ignored_review_states"), ["COMMENTED"]),
+        "approval_handoff.conflicting_latest_timestamp": (
+            handoff.get("conflicting_latest_timestamp"), "fail_closed"),
+        "approval_handoff.concurrent_state_drift": (
+            handoff.get("concurrent_state_drift"), "fail_closed"),
+        "monitor.owner": (monitor.get("owner"), "existing_workflow_monitor"),
+        "monitor.polling": (monitor.get("polling"), "existing_monitor_loop"),
+        "monitor.discovery": (
+            monitor.get("discovery"), "github_open_machine_pull_requests"),
+        "monitor.linear_access": (
+            monitor.get("linear_access"), "approved_candidates_only"),
+        "monitor.github_credential": (
+            monitor.get("github_credential"), "github-machine-arrusted-symphony"),
+    }
+    for field, (actual, wanted) in expected.items():
+        if type(actual) is not type(wanted) or actual != wanted:
+            raise ValueError(f"unsupported requester policy value: {field}")
+    mappings = requester.get("creator_email_mappings")
+    if not isinstance(mappings, list) or not mappings:
+        raise ValueError("invalid requester policy identity")
+    normalized = {}
+    for mapping in mappings:
+        if not isinstance(mapping, dict) \
+                or set(mapping) != {"linear_creator_email", "github_login"}:
+            raise ValueError("invalid requester mapping")
+        email = mapping["linear_creator_email"]
+        login = mapping["github_login"]
+        if not isinstance(email, str) or re.fullmatch(r"[^@\s]+@[^@\s]+", email) is None \
+                or not isinstance(login, str) or not login or email in normalized:
+            raise ValueError("ambiguous requester mapping")
+        normalized[email] = login
+    policy["_requester_by_email"] = normalized
+    return policy
+
+
+def parse_review_timestamp(value):
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        normalized = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return None
+        return parsed.timestamp()
+    except (OverflowError, ValueError):
+        return None
+
+
+def requester_approval_is_current(reviews, pull_number, requester_login):
+    requester_reviews = []
+    for review in reviews:
+        if not isinstance(review, dict):
+            return False
+        user = review.get("user")
+        state = review.get("state")
+        if not isinstance(user, dict) or user.get("login") != requester_login:
+            continue
+        if user.get("type") != "User" or state == "COMMENTED":
+            continue
+        if state not in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            return False
+        submitted_at = parse_review_timestamp(review.get("submitted_at"))
+        if submitted_at is None:
+            return False
+        requester_reviews.append(
+            (submitted_at, state, review.get("pull_request_number", pull_number)))
+    requester_reviews = [
+        review for review in requester_reviews if review[2] == pull_number
+    ]
+    if not requester_reviews:
+        return False
+    latest = max(review[0] for review in requester_reviews)
+    latest_states = {review[1] for review in requester_reviews if review[0] == latest}
+    return latest_states == {"APPROVED"}
+
+
+class ApprovalHandoff:
+    REQUESTER_LINE = re.compile(
+        r"Requester: .+ \(([^()\s]+@[^()\s]+)\) \(@([^()\s]+)\)")
+    LINEAR_LINE = re.compile(
+        r"Linear issue: \[([A-Z][A-Z0-9]*-\d+)\]"
+        r"\((https://linear\.app/[^)\s]+/issue/\1/[^)\s]+)\)")
+    FIXES_LINE = re.compile(r"Fixes ([A-Z][A-Z0-9]*-\d+)")
+
+    def __init__(self, project_slug, linear_key, github_token, policy, request_json,
+                 wall_clock=time.time, retry_clock=time.monotonic,
+                 candidate_retry_seconds=300):
+        self.project_slug = project_slug
+        self.linear_key = linear_key
+        self.github_token = github_token
+        self.policy = policy
+        self.request_json = request_json
+        self.wall_clock = wall_clock
+        self.retry_clock = retry_clock
+        if type(candidate_retry_seconds) is not int or candidate_retry_seconds <= 0:
+            raise ValueError("approval handoff retry seconds must be a positive integer")
+        self.candidate_retry_seconds = candidate_retry_seconds
+        self.candidate_attempts = {}
+        self.linear_requests = 0
+
+    def linear(self, query, variables):
+        self.linear_requests += 1
+        body = json.dumps({"query": query, "variables": variables}).encode()
+        result = self.request_json(
+            LINEAR_URL, data=body,
+            headers={"Authorization": self.linear_key, "Content-Type": "application/json"})
+        if not isinstance(result, dict) or result.get("errors"):
+            raise RuntimeError("Linear approval handoff request failed")
+        data = result.get("data")
+        if not isinstance(data, dict):
+            raise ValueError("invalid Linear approval handoff response")
+        return data
+
+    def github(self, path):
+        return self.request_json(
+            f"{GITHUB_API_URL}{path}",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.github_token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "symphony-approval-handoff",
+            })
+
+    def open_pull_requests(self):
+        repository = self.policy["repository"]
+        page = 1
+        while True:
+            payload = self.github(
+                f"/repos/{repository}/pulls?state=open&per_page=100&page={page}")
+            if not isinstance(payload, list):
+                raise ValueError("invalid GitHub pull request page")
+            for pull in payload:
+                if not isinstance(pull, dict):
+                    raise ValueError("invalid GitHub pull request")
+                yield pull
+            if len(payload) < 100:
+                return
+            page += 1
+
+    def requester_metadata(self, pull):
+        body = pull.get("body")
+        if not isinstance(body, str):
+            return None
+        lines = body.splitlines()
+        requester_lines = [
+            line for line in lines if re.match(r"^Requester:", line, re.IGNORECASE)]
+        linear_lines = [
+            line for line in lines if re.match(r"^Linear issue:", line, re.IGNORECASE)]
+        fixes_lines = [
+            line for line in lines if re.match(r"^Fixes\b", line, re.IGNORECASE)]
+        if len(requester_lines) != 1 or len(linear_lines) != 1 \
+                or len(fixes_lines) != 1:
+            return None
+        requester = self.REQUESTER_LINE.fullmatch(requester_lines[0])
+        linear = self.LINEAR_LINE.fullmatch(linear_lines[0])
+        fixes = self.FIXES_LINE.fullmatch(fixes_lines[0])
+        if requester is None or linear is None or fixes is None:
+            return None
+        email, login = requester.groups()
+        identifier, linear_url = linear.groups()
+        if fixes.group(1) != identifier \
+                or self.policy["_requester_by_email"].get(email) != login:
+            return None
+        return {
+            "requester_email": email,
+            "requester_login": login,
+            "issue_identifier": identifier,
+            "linear_url": linear_url,
+        }
+
+    def reviews(self, pull_number):
+        repository = self.policy["repository"]
+        reviews = []
+        page = 1
+        while True:
+            payload = self.github(
+                f"/repos/{repository}/pulls/{pull_number}/reviews?per_page=100&page={page}")
+            if not isinstance(payload, list):
+                raise ValueError("invalid GitHub reviews response")
+            reviews.extend(payload)
+            if len(payload) < 100:
+                return reviews
+            page += 1
+
+    def approval_fingerprint(self, pull, metadata, reviews):
+        if not requester_approval_is_current(
+                reviews, pull["number"], metadata["requester_login"]):
+            return None
+        requester_reviews = [
+            review for review in reviews
+            if isinstance(review, dict)
+            and isinstance(review.get("user"), dict)
+            and review["user"].get("login") == metadata["requester_login"]
+            and review.get("state") != "COMMENTED"
+        ]
+        latest = max(parse_review_timestamp(review.get("submitted_at"))
+                     for review in requester_reviews)
+        head = pull.get("head")
+        head_sha = head.get("sha") if isinstance(head, dict) else None
+        if not isinstance(head_sha, str) or not head_sha:
+            raise ValueError("invalid GitHub pull request head")
+        return (
+            pull["number"], head_sha, metadata["issue_identifier"],
+            metadata["requester_login"], latest,
+        )
+
+    def candidate_due(self, pull_number, fingerprint):
+        previous = self.candidate_attempts.get(pull_number)
+        now = self.retry_clock()
+        if previous is not None and previous[0] == fingerprint \
+                and now - previous[1] < self.candidate_retry_seconds:
+            return False
+        self.candidate_attempts[pull_number] = (fingerprint, now)
+        return True
+
+    def fresh_issue(self, identifier):
+        query = """query ApprovalHandoffIssue($id: String!) {
+          issue(id: $id) {
+            id
+            identifier
+            url
+            creator { email }
+            state { name }
+            project { slugId }
+            attachments(first: 100) {
+              nodes { url }
+              pageInfo { hasNextPage }
+            }
+            team { states { nodes { id name } } }
+          }
+        }"""
+        issue = self.linear(query, {"id": identifier}).get("issue")
+        if not isinstance(issue, dict):
+            raise ValueError("invalid fresh Linear issue")
+        return issue
+
+    def attached_pull_numbers(self, issue):
+        attachments = issue.get("attachments")
+        if not isinstance(attachments, dict) or not isinstance(attachments.get("nodes"), list):
+            raise ValueError("invalid Linear issue attachments")
+        page_info = attachments.get("pageInfo")
+        if not isinstance(page_info, dict) or type(page_info.get("hasNextPage")) is not bool:
+            raise ValueError("invalid Linear issue attachment page")
+        if page_info["hasNextPage"]:
+            raise RuntimeError("Linear issue has more attachments than the handoff query limit")
+        prefix = f"https://github.com/{self.policy['repository']}/pull/"
+        numbers = set()
+        for attachment in attachments["nodes"]:
+            url = attachment.get("url") if isinstance(attachment, dict) else None
+            if not isinstance(url, str) or not url.startswith(prefix):
+                continue
+            suffix = url[len(prefix):].rstrip("/")
+            if suffix.isdigit():
+                numbers.add(int(suffix))
+        return sorted(numbers)
+
+    def validate_transition_candidate(self, issue, metadata):
+        creator = issue.get("creator")
+        state = issue.get("state")
+        project = issue.get("project")
+        team = issue.get("team")
+        states = team.get("states") if isinstance(team, dict) else None
+        nodes = states.get("nodes") if isinstance(states, dict) else None
+        if not isinstance(creator, dict) or not isinstance(state, dict) \
+                or not isinstance(project, dict) \
+                or not isinstance(nodes, list):
+            raise ValueError("invalid fresh Linear issue state")
+        if issue.get("identifier") != metadata["issue_identifier"] \
+                or issue.get("url") != metadata["linear_url"] \
+                or project.get("slugId") != self.project_slug \
+                or creator.get("email") != metadata["requester_email"] \
+                or self.policy["_requester_by_email"].get(
+                    creator.get("email")) != metadata["requester_login"]:
+            return None
+        if state.get("name") != self.policy["approval_handoff"]["source_state"]:
+            return None
+        destination = self.policy["approval_handoff"]["destination_state"]
+        matches = [
+            candidate.get("id") for candidate in nodes
+            if isinstance(candidate, dict) and candidate.get("name") == destination
+            and isinstance(candidate.get("id"), str) and candidate["id"]
+        ]
+        if len(matches) != 1 or not isinstance(issue.get("id"), str) or not issue["id"]:
+            raise ValueError("Linear destination state is missing or ambiguous")
+        return issue["id"], matches[0]
+
+    def github_authorization_is_fresh(self, issue, pull, metadata, fingerprint):
+        repository = self.policy["repository"]
+        pull_number = pull["number"]
+        open_attached = []
+        fresh_pull = None
+        for attached_number in self.attached_pull_numbers(issue):
+            attached = self.github(f"/repos/{repository}/pulls/{attached_number}")
+            if not isinstance(attached, dict) or attached.get("number") != attached_number:
+                raise ValueError("invalid fresh GitHub pull request")
+            if attached.get("state") == "open":
+                open_attached.append(attached_number)
+            if attached_number == pull_number:
+                fresh_pull = attached
+        if open_attached != [pull_number] or fresh_pull is None:
+            return False
+        user = fresh_pull.get("user")
+        if not isinstance(user, dict) \
+                or user.get("login") != self.policy["machine_login"] \
+                or self.requester_metadata(fresh_pull) != metadata:
+            return False
+        fresh_fingerprint = self.approval_fingerprint(
+            fresh_pull, metadata, self.reviews(pull_number))
+        return fresh_fingerprint == fingerprint
+
+    def transition(self, issue_id, destination_state_id):
+        mutation = """mutation ApprovalHandoff($id: String!, $stateId: String!) {
+          issueUpdate(id: $id, input: {stateId: $stateId}) {
+            success
+            issue { id state { name } }
+          }
+        }"""
+        result = self.linear(
+            mutation, {"id": issue_id, "stateId": destination_state_id}).get("issueUpdate")
+        expected = self.policy["approval_handoff"]["destination_state"]
+        updated_issue = result.get("issue") if isinstance(result, dict) else None
+        state = updated_issue.get("state") if isinstance(updated_issue, dict) else None
+        if not isinstance(result, dict) or result.get("success") is not True \
+                or not isinstance(state, dict) or state.get("name") != expected:
+            raise RuntimeError("Linear approval handoff mutation was not acknowledged")
+
+    def reconcile_pull(self, pull):
+        number = pull.get("number")
+        if type(number) is not int or number <= 0 or pull.get("state") != "open":
+            raise ValueError("invalid GitHub pull request identity")
+        metadata = self.requester_metadata(pull)
+        if metadata is None:
+            return "metadata_ineligible"
+        reviews = self.reviews(number)
+        fingerprint = self.approval_fingerprint(pull, metadata, reviews)
+        if fingerprint is None:
+            return "requester_not_approved"
+        if not self.candidate_due(number, fingerprint):
+            return "candidate_deferred"
+        issue = self.fresh_issue(metadata["issue_identifier"])
+        transition = self.validate_transition_candidate(issue, metadata)
+        if transition is None:
+            return "linear_ineligible"
+        if not self.github_authorization_is_fresh(
+                issue, pull, metadata, fingerprint):
+            return "github_state_drift"
+        issue_id, destination_state_id = transition
+        self.transition(issue_id, destination_state_id)
+        print(json.dumps({
+            "event": "linear_approval_handoff_transition",
+            "issue_id": issue_id,
+            "issue_identifier": metadata["issue_identifier"],
+            "pull_request": number,
+            "requester": metadata["requester_login"],
+            "source_state": self.policy["approval_handoff"]["source_state"],
+            "destination_state": self.policy["approval_handoff"]["destination_state"],
+            "timestamp": int(self.wall_clock()),
+        }, sort_keys=True), flush=True)
+        return "transitioned"
+
+    def reconcile(self):
+        outcomes = {
+            "observed": 0, "linear_candidates": 0, "linear_requests": 0,
+            "deferred": 0, "transitioned": 0, "failed": 0,
+        }
+        self.linear_requests = 0
+        pulls = list(self.open_pull_requests())
+        machine_pulls = [
+            pull for pull in pulls
+            if isinstance(pull.get("user"), dict)
+            and pull["user"].get("login") == self.policy["machine_login"]
+        ]
+        machine_pull_numbers = {
+            pull.get("number") for pull in machine_pulls
+            if type(pull.get("number")) is int
+        }
+        self.candidate_attempts = {
+            number: attempt for number, attempt in self.candidate_attempts.items()
+            if number in machine_pull_numbers
+        }
+        for pull in machine_pulls:
+            outcomes["observed"] += 1
+            try:
+                before = self.linear_requests
+                outcome = self.reconcile_pull(pull)
+                if outcome == "candidate_deferred":
+                    outcomes["deferred"] += 1
+                elif outcome == "transitioned":
+                    outcomes["transitioned"] += 1
+            except (
+                    AttributeError, KeyError, OSError, RuntimeError, TypeError,
+                    ValueError, urllib.error.URLError) as error:
+                outcomes["failed"] += 1
+                print(json.dumps({
+                    "event": "linear_approval_handoff_failed",
+                    "pull_request": pull.get("number") if isinstance(pull, dict) else None,
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                    "timestamp": int(self.wall_clock()),
+                }, sort_keys=True), file=sys.stderr, flush=True)
+            finally:
+                if self.linear_requests > before:
+                    outcomes["linear_candidates"] += 1
+        outcomes["linear_requests"] = self.linear_requests
+        return outcomes
+
+
 class Scaler:
     def __init__(self, now=time.monotonic, wall_clock=time.time):
         self.now = now
@@ -285,8 +760,36 @@ class Scaler:
         self.metrics = {"healthy": 0, "desired": self.minimum, "queue": 0, "blocked": 0,
                         "current": self.minimum, "drained": 0,
                         "cooldown": 0, "errors": 0, "ledger_errors": 0,
+                        "handoff_observed": 0, "handoff_transitions": 0,
+                        "handoff_linear_candidates": 0,
+                        "handoff_linear_requests": 0,
+                        "handoff_deferred": 0, "handoff_failures": 0,
                         "last_error": "", "last_error_stage": "",
                         "last_error_timestamp": 0, "last_success_timestamp": 0}
+        self.initialize_approval_handoff()
+
+    def initialize_approval_handoff(self):
+        self.approval_handoff = None
+        try:
+            policy = load_requester_policy(
+                os.getenv(
+                    "REQUESTER_POLICY_PATH",
+                    "/etc/symphony-workflow/requester-policy.json"))
+            self.approval_handoff = ApprovalHandoff(
+                os.environ["LINEAR_PROJECT_SLUG"], os.environ["LINEAR_API_KEY"],
+                os.environ["GITHUB_TOKEN"],
+                policy, self.request_json, wall_clock=self.wall_clock,
+                retry_clock=self.now,
+                candidate_retry_seconds=int(os.getenv(
+                    "APPROVAL_HANDOFF_RETRY_SECONDS", "300")))
+        except (KeyError, OSError, ValueError) as error:
+            self.metrics["handoff_failures"] = self.metrics.get("handoff_failures", 0) + 1
+            print(json.dumps({
+                "event": "linear_approval_handoff_initialization_failed",
+                "error_type": type(error).__name__,
+                "error": str(error),
+                "timestamp": int(self.wall_clock()),
+            }, sort_keys=True), file=sys.stderr, flush=True)
 
     def at_stage(self, stage, function, *args, **kwargs):
         self.reconcile_stage = stage
@@ -446,7 +949,9 @@ class Scaler:
         try:
             self.reconcile()
             self.metrics["last_success_timestamp"] = int(self.wall_clock())
-        except (KeyError, OSError, RuntimeError, ValueError, urllib.error.URLError) as error:
+        except (
+                AttributeError, KeyError, OSError, RuntimeError, TypeError,
+                ValueError, urllib.error.URLError) as error:
             self.low_demand_since = None
             error_type = type(error).__name__
             timestamp = int(self.wall_clock())
@@ -461,6 +966,39 @@ class Scaler:
                 "error_type": error_type,
                 "error": str(error),
                 "timestamp": timestamp,
+            }, sort_keys=True), file=sys.stderr, flush=True)
+        if not hasattr(self, "approval_handoff"):
+            return
+        handoff = self.approval_handoff
+        if handoff is None:
+            self.initialize_approval_handoff()
+            handoff = self.approval_handoff
+            if handoff is None:
+                return
+        try:
+            outcomes = handoff.reconcile()
+            self.metrics["handoff_observed"] = outcomes["observed"]
+            self.metrics["handoff_linear_candidates"] = (
+                self.metrics.get("handoff_linear_candidates", 0)
+                + outcomes["linear_candidates"])
+            self.metrics["handoff_linear_requests"] = (
+                self.metrics.get("handoff_linear_requests", 0)
+                + outcomes["linear_requests"])
+            self.metrics["handoff_deferred"] = (
+                self.metrics.get("handoff_deferred", 0) + outcomes["deferred"])
+            self.metrics["handoff_transitions"] = (
+                self.metrics.get("handoff_transitions", 0) + outcomes["transitioned"])
+            self.metrics["handoff_failures"] = (
+                self.metrics.get("handoff_failures", 0) + outcomes["failed"])
+        except (
+                AttributeError, KeyError, OSError, RuntimeError, TypeError,
+                ValueError, urllib.error.URLError) as error:
+            self.metrics["handoff_failures"] = self.metrics.get("handoff_failures", 0) + 1
+            print(json.dumps({
+                "event": "linear_approval_handoff_failed",
+                "error_type": type(error).__name__,
+                "error": str(error),
+                "timestamp": int(self.wall_clock()),
             }, sort_keys=True), file=sys.stderr, flush=True)
 
 
@@ -478,6 +1016,12 @@ def metrics_lines(scaler):
         f'symphony_autoscaler_scale_down_cooldown_seconds {metrics["cooldown"]}',
         f'symphony_autoscaler_errors_total {metrics["errors"]}',
         f'symphony_usage_ledger_errors_total {metrics["ledger_errors"] + scaler.usage_ledger.load_errors}',
+        f'symphony_approval_handoff_observed_pull_requests {metrics.get("handoff_observed", 0)}',
+        f'symphony_approval_handoff_linear_candidates_total {metrics.get("handoff_linear_candidates", 0)}',
+        f'symphony_approval_handoff_linear_requests_total {metrics.get("handoff_linear_requests", 0)}',
+        f'symphony_approval_handoff_deferred_candidates_total {metrics.get("handoff_deferred", 0)}',
+        f'symphony_approval_handoff_transitions_total {metrics.get("handoff_transitions", 0)}',
+        f'symphony_approval_handoff_failures_total {metrics.get("handoff_failures", 0)}',
         f'symphony_autoscaler_last_error_timestamp_seconds {metrics["last_error_timestamp"]}',
         f'symphony_autoscaler_last_success_timestamp_seconds {metrics["last_success_timestamp"]}',
     ]

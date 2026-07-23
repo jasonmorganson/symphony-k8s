@@ -2,13 +2,21 @@ name: Publish Symphony images
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - autoscaler/**
+      - config/**
+      - docker/**
+      - k8s/**
+      - scripts/**
+      - tests/**
+      - .github/workflows/publish-images.yml
   push:
     branches: [master]
     paths:
-      - docker/**
       - autoscaler/**
-      - docker/worker/**
       - config/**
+      - docker/**
       - k8s/**
       - scripts/**
       - tests/**
@@ -16,22 +24,12 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-24.04
-    outputs:
-      orchestrator_image: ${{ steps.image-digests.outputs.orchestrator_image }}
-      worker_image: ${{ steps.image-digests.outputs.worker_image }}
-      autoscaler_image: ${{ steps.image-digests.outputs.autoscaler_image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install pinned Kustomize
         run: |
           bash scripts/install-kustomize.sh "$RUNNER_TEMP/bin"
@@ -50,6 +48,25 @@ jobs:
         env:
           KUSTOMIZE: kustomize build
         run: bash tests/test-kustomize-boundaries.sh
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      orchestrator_image: ${{ steps.image-digests.outputs.orchestrator_image }}
+      worker_image: ${{ steps.image-digests.outputs.worker_image }}
+      autoscaler_image: ${{ steps.image-digests.outputs.autoscaler_image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build images
         run: |
           docker build -t symphony-runtime-base:do -f docker/runtime-base/Dockerfile .
