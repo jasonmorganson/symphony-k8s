@@ -611,6 +611,25 @@ class ApprovalHandoffTest(unittest.TestCase):
         self.handoff.transition.assert_called_once_with("issue-210", "merging-state")
         linear.assert_not_called()
 
+    def test_project_slug_compares_linear_slug_id_suffix(self):
+        handoff = ApprovalHandoff(
+            "arrusted-development-71c3d9986f6d",
+            "linear", "github", self.policy, mock.Mock(),
+        )
+        issue = {
+            **self.issue,
+            "project": {"slugId": "71c3d9986f6d"},
+        }
+        metadata = handoff.requester_metadata(self.pull)
+        self.assertEqual(
+            handoff.validate_transition_candidate(issue, metadata),
+            ("issue-210", "merging-state"),
+        )
+        self.assertIsNone(handoff.validate_transition_candidate(
+            {**issue, "project": {"slugId": "different"}},
+            metadata,
+        ))
+
     def test_approved_candidate_uses_exactly_one_read_and_one_mutation(self):
         def request_json(url, **kwargs):
             if "pulls?state=open" in url:
