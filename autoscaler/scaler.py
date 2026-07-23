@@ -412,6 +412,7 @@ class ApprovalHandoff:
                  wall_clock=time.time, retry_clock=time.monotonic,
                  candidate_retry_seconds=300):
         self.project_slug = project_slug
+        self.project_slug_id = project_slug.rsplit("-", 1)[-1]
         self.linear_key = linear_key
         self.github_token = github_token
         self.policy = policy
@@ -593,7 +594,7 @@ class ApprovalHandoff:
             raise ValueError("invalid fresh Linear issue state")
         if issue.get("identifier") != metadata["issue_identifier"] \
                 or issue.get("url") != metadata["linear_url"] \
-                or project.get("slugId") != self.project_slug \
+                or project.get("slugId") != self.project_slug_id \
                 or creator.get("email") != metadata["requester_email"] \
                 or self.policy["_requester_by_email"].get(
                     creator.get("email")) != metadata["requester_login"]:
