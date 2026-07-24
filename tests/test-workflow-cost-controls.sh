@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 worker_patch="$ROOT_DIR/k8s/digitalocean/single-node-worker-patch.yaml"
 worker_statefulset="$ROOT_DIR/k8s/base/worker-statefulset.yaml"
+orchestrator_deployment="$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
 runtime="$ROOT_DIR/config/workflow-runtime.yaml"
 generator="$ROOT_DIR/scripts/generate-skaffold-inputs.sh"
 autoscaler="$ROOT_DIR/k8s/digitalocean/autoscaler.yaml"
@@ -67,5 +68,12 @@ grep -A2 'updateStrategy:' "$worker_statefulset" | grep -q 'type: OnDelete'
 grep -q 'mkdir -p /srv/worker-data/mise-data' "$worker_statefulset"
 grep -A2 'mountPath: /home/symphony/.local/share/mise' "$worker_statefulset" | \
   grep -q 'subPath: mise-data'
+grep -q -- '- "/etc/symphony-workflow/WORKFLOW.md"' "$orchestrator_deployment"
+grep -A2 'name: workflow$' "$orchestrator_deployment" | \
+  grep -q 'mountPath: /etc/symphony-workflow'
+if grep -A3 'name: workflow$' "$orchestrator_deployment" | grep -q 'subPath:'; then
+  echo "orchestrator workflow mount must support ConfigMap hot reload" >&2
+  exit 1
+fi
 
 echo "workflow cost-control tests passed"
