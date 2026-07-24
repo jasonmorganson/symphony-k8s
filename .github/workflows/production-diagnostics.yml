@@ -2,6 +2,12 @@ name: Diagnose Symphony production
 
 on:
   workflow_dispatch:
+    inputs:
+      probe_codex:
+        description: Run one minimal read-only Codex request on every worker
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -88,3 +94,40 @@ jobs:
               -e 's/((token|secret|password|authorization|cookie)[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
               -e 's/(Bearer[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' ||
             true
+      - name: Probe worker Codex sessions
+        if: inputs.probe_codex
+        run: |
+          set -euo pipefail
+          status=0
+          pids=()
+
+          for worker in $(kubectl -n symphony get pods \
+            -l app=symphony-worker \
+            -o name); do
+            (
+              echo "Probing ${worker}"
+              kubectl -n symphony exec "$worker" -- \
+                timeout 45s \
+                runuser -u symphony -- \
+                env HOME=/home/symphony \
+                codex exec \
+                  --skip-git-repo-check \
+                  --sandbox read-only \
+                  --color never \
+                  "Reply with exactly OK."
+            ) >"${RUNNER_TEMP}/${worker##*/}.log" 2>&1 &
+            pids+=("$!")
+          done
+
+          for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then
+              status=1
+            fi
+          done
+          for log in "${RUNNER_TEMP}"/symphony-worker-*.log; do
+            sed -E \
+              -e 's/((token|secret|password|authorization|cookie)[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+              -e 's/(Bearer[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' \
+              "$log"
+          done
+          exit "$status"
