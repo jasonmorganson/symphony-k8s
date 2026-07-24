@@ -12,6 +12,11 @@ kustomization="$ROOT_DIR/k8s/kustomization.yaml"
 grep -q '^worker:$' "$runtime"
 grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$runtime"
 grep -q '^  max_concurrent_agents: 10$' "$runtime"
+grep -q '^  max_turns: 10$' "$runtime"
+for state in 'In Progress' Merging Rework; do
+  grep -A3 '^  continuation_delay_ms_by_state:' "$runtime" | \
+    grep -q "^    $state: 60000$"
+done
 grep -A3 '^  dispatch_state_order:' "$runtime" | grep -q -- '- Merging'
 grep -q '^  root: /srv/symphony/workspaces$' "$runtime"
 grep -q -- '--model gpt-5.6 app-server' "$runtime"

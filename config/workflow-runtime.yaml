@@ -41,7 +41,11 @@ hooks:
     fi
 agent:
   max_concurrent_agents: 10
-  max_turns: 20
+  max_turns: 10
+  continuation_delay_ms_by_state:
+    In Progress: 60000
+    Merging: 60000
+    Rework: 60000
   dispatch_state_order:
     - Merging
   max_concurrent_agents_by_state:
