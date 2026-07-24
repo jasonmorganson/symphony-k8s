@@ -18,6 +18,7 @@ grep -q -- '--model gpt-5.6 app-server' "$runtime"
 grep -q 'model_reasoning_effort=medium' "$runtime"
 grep -q 'agents.max_threads=3' "$runtime"
 grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$runtime"
+grep -A1 '^hooks:$' "$runtime" | grep -q '^  timeout_ms: 600000$'
 grep -q 'workflow_body=.*awk' "$generator"
 grep -q "SYMPHONY_WORKFLOW_FILE" "$generator"
 grep -q 'SYMPHONY_WORKER_DRAIN_TOKEN' "$generator"

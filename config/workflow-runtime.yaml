@@ -32,6 +32,7 @@ worker:
   max_concurrent_agents_per_host: 1
   drain_state_path: /srv/symphony/workspaces/.worker-drains.json
 hooks:
+  timeout_ms: 600000
   after_create: |
     exec /usr/local/bin/bootstrap-arrusted-workspace "$PWD"
   before_remove: |
