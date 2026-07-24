@@ -41,6 +41,8 @@ hooks:
 agent:
   max_concurrent_agents: 10
   max_turns: 20
+  dispatch_state_order:
+    - Merging
   max_concurrent_agents_by_state:
     Merging: 1
 codex:
