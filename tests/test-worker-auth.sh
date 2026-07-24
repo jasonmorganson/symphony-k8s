@@ -46,6 +46,34 @@ assert_auth_result "Not logged in" failure
 OPENAI_API_KEY=sk-test assert_auth_result "Logged in using an API key - sk-***" failure
 assert_required_commands
 assert_required_commands gh
+assert_required_commands timeout
+
+assert_session_result() {
+  local mode="$1" expected="$2" output rc=0
+  runuser() {
+    if [[ "$*" != *"codex exec"* ]]; then
+      echo "unexpected command: $*" >&2
+      return 99
+    fi
+    case "$mode" in
+      success) printf '%s\n' "OK" ;;
+      unexpected) printf '%s\n' "not ok" ;;
+      failure) return 1 ;;
+    esac
+  }
+  output="$(verify_codex_chatgpt_session 2>&1)" || rc=$?
+  if [[ "$expected" == success ]]; then
+    [[ "$rc" -eq 0 && -z "$output" ]]
+  else
+    [[ "$rc" -ne 0 ]]
+    [[ "$output" == *"Codex ChatGPT session"* ]]
+  fi
+  unset -f runuser
+}
+
+assert_session_result success success
+assert_session_result unexpected failure
+assert_session_result failure failure
 
 assert_machine_identity_result() {
   local login="$1" expected="$2" repository_access="${3:-success}"
@@ -167,6 +195,10 @@ grep -q 'mountPath: /home/symphony/.codex' "${worker_manifests[0]}"
 grep -q 'subPath: codex-home' "${worker_manifests[0]}"
 grep -A8 'readinessProbe:' "${worker_manifests[0]}" | grep -q 'timeoutSeconds: 5'
 grep -A8 'readinessProbe:' "${worker_manifests[0]}" | grep -q '/run/symphony-worker-ready'
+if grep -A8 'readinessProbe:' "${worker_manifests[0]}" | grep -q 'codex login status'; then
+  echo "worker readiness still trusts the non-validating Codex login status" >&2
+  exit 1
+fi
 
 grep -q '^    gh \\' "$ROOT_DIR/docker/worker/Dockerfile"
 grep -q 'gh --version' "$ROOT_DIR/docker/worker/Dockerfile"
@@ -181,6 +213,9 @@ grep -q 'GITHUB_MACHINE_LOGIN="autograph-symphony"' "$ROOT_DIR/docker/worker/ent
 grep -q 'GITHUB_MACHINE_EMAIL="jason+symphony@withgraph.com"' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'git config --global user.useConfigOnly true' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'verify_sshd_git_identity' "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'verify_codex_chatgpt_session' "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'Codex ChatGPT session could not complete an authenticated request' \
+  "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'git ls-remote --exit-code' "$ROOT_DIR/docker/worker/entrypoint.sh"
 sshd_config="$ROOT_DIR/config/sshd_config.d/worker.conf"
 setenv_line='SetEnv GIT_AUTHOR_NAME=autograph-symphony GIT_AUTHOR_EMAIL=jason+symphony@withgraph.com GIT_COMMITTER_NAME=autograph-symphony GIT_COMMITTER_EMAIL=jason+symphony@withgraph.com'
