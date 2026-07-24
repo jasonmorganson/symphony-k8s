@@ -8,14 +8,17 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 cat > "$TEMP_DIR/kubectl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$KUBECTL_LOG"
+printf 'kubectl:%s\n' "$*" >> "$EVENT_LOG"
 
 if [[ "$*" == "get --raw "* ]]; then
   case "${STATE_MODE:-idle}" in
     idle)
-      printf '%s\n' '{"running":[],"retrying":[]}'
+      printf '{"running":[],"retrying":[],"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":%s}}\n' \
+        "${INITIAL_DRAINS_JSON:-[]}"
       ;;
     busy)
-      printf '%s\n' '{"running":[{"issue_identifier":"A-230"}],"retrying":[]}'
+      printf '%s\n' \
+        '{"running":[{"issue_identifier":"A-230"}],"retrying":[],"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
       ;;
     busy_then_idle)
       count=0
@@ -25,9 +28,11 @@ if [[ "$*" == "get --raw "* ]]; then
       count=$((count + 1))
       printf '%s\n' "$count" > "$STATE_COUNT_FILE"
       if (( count == 1 )); then
-        printf '%s\n' '{"running":[{"issue_identifier":"A-230"}],"retrying":[]}'
+        printf '%s\n' \
+          '{"running":[{"issue_identifier":"A-230"}],"retrying":[],"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":["worker-1"]}}'
       else
-        printf '%s\n' '{"running":[],"retrying":[{"issue_identifier":"A-211"}]}'
+        printf '%s\n' \
+          '{"running":[],"retrying":[{"issue_identifier":"A-211"}],"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":["worker-1"]}}'
       fi
       ;;
     invalid)
@@ -37,6 +42,33 @@ if [[ "$*" == "get --raw "* ]]; then
       exit 1
       ;;
   esac
+  exit 0
+fi
+
+if [[ "$*" == *"-n symphony get deployment symphony-autoscaler "* ]] &&
+    [[ "$*" == *"jsonpath={.spec.replicas}"* ]]; then
+  printf '%s' "${AUTOSCALER_REPLICAS:-1}"
+  exit 0
+fi
+
+if [[ "$*" == *"-n symphony exec deployment/symphony-orchestrator "* ]]; then
+  payload="$(cat)"
+  printf '%s\n' "$payload" >> "$DRAIN_LOG"
+  desired="$(printf '%s' "$payload" | jq -c '.drained_worker_hosts')"
+  printf 'drain:%s\n' "$desired" >> "$EVENT_LOG"
+  drain_count=0
+  if [[ -f "$DRAIN_COUNT_FILE" ]]; then
+    drain_count="$(cat "$DRAIN_COUNT_FILE")"
+  fi
+  drain_count=$((drain_count + 1))
+  printf '%s\n' "$drain_count" > "$DRAIN_COUNT_FILE"
+  if [[ "${DRAIN_FAIL_AT:-0}" == "$drain_count" ]]; then
+    exit 1
+  fi
+  if [[ "${DRAIN_ACK_INVALID:-0}" == "1" ]]; then
+    desired='["unexpected-worker"]'
+  fi
+  printf '{"drained_hosts":%s,"active_drained_hosts":[]}\n' "$desired"
   exit 0
 fi
 
@@ -58,8 +90,12 @@ if [[ "$*" == *" get statefulset symphony-worker "* ]] &&
 fi
 
 if [[ "$*" == *" get statefulset symphony-worker "* ]]; then
-  printf '%s' "$WORKER_IMAGE"
+  printf '%s' "${WORKER_DEPLOYED_IMAGE:-$WORKER_IMAGE}"
   exit 0
+fi
+
+if [[ " $* " == *" apply -f "* ]] && [[ "${KUBECTL_FAIL_APPLY:-0}" == "1" ]]; then
+  exit 1
 fi
 
 if [[ "$*" == *" rollout status "* ]] &&
@@ -86,12 +122,26 @@ if [[ "${KUSTOMIZE_ERROR:-0}" == "1" ]]; then
   exit 1
 fi
 if [[ "${1:-}" == "build" ]]; then
-  worker_replicas="$(awk '/^  replicas: / { print $2; exit }' \
-    "$2/single-node-worker-patch.yaml")"
+  worker_patch="$2/single-node-worker-patch.yaml"
+  autoscaler_manifest="$2/autoscaler.yaml"
+  if [[ ! -f "$worker_patch" ]]; then
+    worker_patch="$2/digitalocean/single-node-worker-patch.yaml"
+  fi
+  if [[ ! -f "$autoscaler_manifest" ]]; then
+    autoscaler_manifest="$2/digitalocean/autoscaler.yaml"
+  fi
+  worker_replicas="$(awk '/^  replicas: / { print $2; exit }' "$worker_patch")"
   printf 'build worker_replicas=%s\n' "$worker_replicas" >> "$KUSTOMIZE_LOG"
   orchestrator="${ORCHESTRATOR_IMAGE:-ghcr.io/example/orchestrator@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
   worker="${WORKER_IMAGE:-ghcr.io/example/worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
   autoscaler="${AUTOSCALER_IMAGE:-ghcr.io/example/autoscaler@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}"
+  autoscaler_replicas="$(awk '
+    /^kind: Deployment$/ { deployment = 1; next }
+    deployment && /^  name: symphony-autoscaler$/ { autoscaler = 1; next }
+    autoscaler && /^  replicas: / { print $2; exit }
+  ' "$autoscaler_manifest")"
+  printf 'build autoscaler_replicas=%s\n' \
+    "${autoscaler_replicas:-1}" >> "$KUSTOMIZE_LOG"
   printf '%s\n' \
     'apiVersion: apps/v1' \
     'kind: Deployment' \
@@ -120,6 +170,7 @@ if [[ "${1:-}" == "build" ]]; then
     'metadata:' \
     '  name: symphony-autoscaler' \
     'spec:' \
+    "  replicas: ${autoscaler_replicas:-1}" \
     '  template:' \
     '    spec:' \
     '      containers:' \
@@ -132,6 +183,10 @@ chmod +x "$TEMP_DIR/kustomize"
 export KUBECTL_LOG="$TEMP_DIR/kubectl.log"
 export DOCTL_LOG="$TEMP_DIR/doctl.log"
 export KUSTOMIZE_LOG="$TEMP_DIR/kustomize.log"
+export DRAIN_LOG="$TEMP_DIR/drain.log"
+export EVENT_LOG="$TEMP_DIR/event.log"
+export DRAIN_COUNT_FILE="$TEMP_DIR/drain-count"
+export SYMPHONY_WORKER_DRAIN_TOKEN="sentinel-drain-token-that-must-not-appear"
 export STATE_COUNT_FILE="$TEMP_DIR/state-count"
 
 ORCHESTRATOR_IMAGE="ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -144,7 +199,20 @@ reset_logs() {
   : > "$KUBECTL_LOG"
   : > "$DOCTL_LOG"
   : > "$KUSTOMIZE_LOG"
+  : > "$DRAIN_LOG"
+  : > "$EVENT_LOG"
   rm -f "$STATE_COUNT_FILE"
+  rm -f "$DRAIN_COUNT_FILE"
+}
+
+assert_restored() {
+  local expected_drains="${1:-[]}"
+  local expected_replicas="${2:-1}"
+
+  jq -se --argjson expected "$expected_drains" \
+    '.[-1].drained_worker_hosts == $expected' "$DRAIN_LOG" >/dev/null
+  grep -F -- "-n symphony scale deployment/symphony-autoscaler --replicas=$expected_replicas" \
+    "$KUBECTL_LOG" >/dev/null
 }
 
 run_deploy() {
@@ -170,6 +238,43 @@ grep -F "apply --dry-run=client -f " "$KUBECTL_LOG"
 grep -F "apply -f " "$KUBECTL_LOG"
 grep -F -- "-n symphony get statefulset symphony-worker -o jsonpath={.spec.replicas}" "$KUBECTL_LOG"
 grep -F "build worker_replicas=2" "$KUSTOMIZE_LOG"
+grep -F "build autoscaler_replicas=0" "$KUSTOMIZE_LOG"
+jq -se '
+  length == 3 and
+  .[0].drained_worker_hosts == ["worker-0", "worker-1"] and
+  .[1].drained_worker_hosts == ["worker-0", "worker-1"] and
+  .[2].drained_worker_hosts == []
+' "$DRAIN_LOG" >/dev/null
+scale_down_line="$(grep -nF -- \
+  '-n symphony scale deployment/symphony-autoscaler --replicas=0' \
+  "$KUBECTL_LOG" | head -1 | cut -d: -f1)"
+apply_line="$(grep -nF 'apply -f ' "$KUBECTL_LOG" | head -1 | cut -d: -f1)"
+restore_line="$(grep -nF -- \
+  '-n symphony scale deployment/symphony-autoscaler --replicas=1' \
+  "$KUBECTL_LOG" | tail -1 | cut -d: -f1)"
+(( scale_down_line < apply_line && apply_line < restore_line ))
+first_drain_line="$(grep -nF 'drain:["worker-0","worker-1"]' \
+  "$EVENT_LOG" | head -1 | cut -d: -f1)"
+scale_down_event_line="$(grep -nF \
+  'kubectl:-n symphony scale deployment/symphony-autoscaler --replicas=0' \
+  "$EVENT_LOG" | head -1 | cut -d: -f1)"
+scale_down_ready_line="$(grep -nF \
+  'kubectl:-n symphony rollout status deployment/symphony-autoscaler --timeout=5m' \
+  "$EVENT_LOG" | head -1 | cut -d: -f1)"
+second_drain_line="$(grep -nF 'drain:["worker-0","worker-1"]' \
+  "$EVENT_LOG" | tail -1 | cut -d: -f1)"
+idle_poll_line="$(grep -nF 'kubectl:get --raw ' "$EVENT_LOG" |
+  tail -1 | cut -d: -f1)"
+apply_event_line="$(grep -nF 'kubectl:apply -f ' "$EVENT_LOG" |
+  head -1 | cut -d: -f1)"
+restore_drain_line="$(grep -nF 'drain:[]' "$EVENT_LOG" |
+  tail -1 | cut -d: -f1)"
+(( first_drain_line < scale_down_event_line &&
+   scale_down_event_line < scale_down_ready_line &&
+   scale_down_ready_line < second_drain_line &&
+   second_drain_line < idle_poll_line &&
+   idle_poll_line < apply_event_line &&
+   apply_event_line < restore_drain_line ))
 grep -F "annotate --overwrite deployment/symphony-orchestrator deployment/symphony-autoscaler statefulset/symphony-worker symphony.morganson.me/source-revision=$SOURCE_REVISION" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-orchestrator --timeout=10m" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-autoscaler --timeout=10m" "$KUBECTL_LOG"
@@ -192,6 +297,7 @@ grep -F "kubernetes cluster kubeconfig save --expiry-seconds 600 symphony-k8s" "
 reset_logs
 STATE_MODE=busy_then_idle run_deploy
 [[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "2" ]]
+jq -se '.[-1].drained_worker_hosts == ["worker-1"]' "$DRAIN_LOG" >/dev/null
 grep -F "kubernetes cluster node-pool update symphony-k8s symphony-ha --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
 
 reset_logs
@@ -200,7 +306,8 @@ if STATE_MODE=busy SYMPHONY_IDLE_TIMEOUT_SECONDS=0 run_deploy; then
   exit 1
 fi
 [[ ! -s "$DOCTL_LOG" ]]
-if grep -F "apply " "$KUBECTL_LOG"; then
+jq -se '.[-1].drained_worker_hosts == []' "$DRAIN_LOG" >/dev/null
+if grep -F "apply -f " "$KUBECTL_LOG"; then
   echo "busy Symphony must fail before applying resources" >&2
   exit 1
 fi
@@ -215,12 +322,23 @@ for state_mode in invalid unavailable; do
 done
 
 reset_logs
+if DRAIN_ACK_INVALID=1 run_deploy; then
+  echo "invalid drain acknowledgement must fail closed" >&2
+  exit 1
+fi
+[[ ! -s "$DOCTL_LOG" ]]
+if grep -F "apply -f " "$KUBECTL_LOG"; then
+  echo "invalid drain acknowledgement must fail before applying resources" >&2
+  exit 1
+fi
+
+reset_logs
 if MISSING_DEPLOYMENTS=coredns run_deploy; then
   echo "missing required deployment must fail preflight" >&2
   exit 1
 fi
 [[ ! -s "$DOCTL_LOG" ]]
-if grep -F "apply " "$KUBECTL_LOG"; then
+if grep -F "apply -f " "$KUBECTL_LOG"; then
   echo "overlay must not be applied after failed preflight" >&2
   exit 1
 fi
@@ -238,7 +356,7 @@ if KUSTOMIZE_ERROR=1 run_deploy; then
   exit 1
 fi
 [[ ! -s "$DOCTL_LOG" ]]
-if grep -F "apply " "$KUBECTL_LOG"; then
+if grep -F "apply -f " "$KUBECTL_LOG"; then
   echo "render errors must fail before applying resources" >&2
   exit 1
 fi
@@ -248,8 +366,49 @@ if DOCTL_ERROR=1 run_deploy; then
   echo "node-pool reconciliation errors must fail deployment" >&2
   exit 1
 fi
+assert_restored
 if grep -F "apply -f " "$KUBECTL_LOG"; then
   echo "provider failure must occur before the real apply" >&2
+  exit 1
+fi
+
+reset_logs
+if KUBECTL_FAIL_APPLY=1 run_deploy; then
+  echo "apply failure must fail deployment" >&2
+  exit 1
+fi
+assert_restored
+
+reset_logs
+if KUBECTL_FAIL_ROLLOUT=symphony-orchestrator run_deploy; then
+  echo "orchestrator rollout failure must fail deployment" >&2
+  exit 1
+fi
+assert_restored
+
+reset_logs
+wrong_worker_image="ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+if WORKER_DEPLOYED_IMAGE="$wrong_worker_image" run_deploy; then
+  echo "worker verification failure must fail deployment" >&2
+  exit 1
+fi
+assert_restored
+
+reset_logs
+DRAIN_FAIL_AT=3 run_deploy
+[[ "$(wc -l < "$DRAIN_LOG" | tr -d ' ')" == "4" ]]
+assert_restored
+
+reset_logs
+INITIAL_DRAINS_JSON='["worker-1"]' AUTOSCALER_REPLICAS=2 run_deploy
+assert_restored '["worker-1"]' 2
+
+reset_logs
+DEPLOY_BOOTSTRAP_RUNTIME=true run_deploy
+if grep -F "get --raw " "$KUBECTL_LOG" ||
+    grep -F "worker-drains" "$KUBECTL_LOG" ||
+    grep -F "scale deployment/symphony-autoscaler --replicas=0" "$KUBECTL_LOG"; then
+  echo "bootstrap deployment must skip runtime quiescing" >&2
   exit 1
 fi
 
@@ -278,5 +437,10 @@ fi
 grep -F -- "-n symphony get deployment,statefulset,pods -o wide" "$KUBECTL_LOG"
 grep -F -- "-n symphony describe deployment symphony-orchestrator" "$KUBECTL_LOG"
 grep -F -- "-n symphony describe deployment symphony-autoscaler" "$KUBECTL_LOG"
+
+if grep -R -F "$SYMPHONY_WORKER_DRAIN_TOKEN" "$TEMP_DIR"; then
+  echo "deployment diagnostics must not expose the worker drain token" >&2
+  exit 1
+fi
 
 echo "DOKS deployment tests passed"
