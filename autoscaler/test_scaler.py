@@ -1035,6 +1035,17 @@ class ReconcileTest(unittest.TestCase):
                 self.assertEqual(scaler.metrics["handoff_failures"], 1)
                 self.assertEqual(scaler.metrics["errors"], 0)
 
+    def test_capacity_reconciliation_can_skip_approval_handoff(self):
+        scaler = FakeScaler()
+        scaler.issues = 3
+        scaler.approval_handoff = mock.Mock()
+
+        scaler.run_once(reconcile_handoff=False)
+
+        self.assertEqual(scaler.changes, [3])
+        self.assertEqual(scaler.metrics["healthy"], 1)
+        scaler.approval_handoff.reconcile.assert_not_called()
+
     def test_capacity_failure_does_not_prevent_handoff_reconciliation(self):
         scaler = FakeScaler()
         scaler.fail = True
