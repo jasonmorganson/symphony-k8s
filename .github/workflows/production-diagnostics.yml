@@ -57,6 +57,30 @@ jobs:
           kubectl -n symphony get events \
             --sort-by=.metadata.creationTimestamp \
             --field-selector type=Warning
+
+          echo "Current orchestrator logs"
+          kubectl -n symphony logs deployment/symphony-orchestrator \
+            --since=20m \
+            --tail=2000 2>&1 |
+            sed -E \
+              -e 's/((token|secret|password|authorization|cookie)[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+              -e 's/(Bearer[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' ||
+            true
+
+          for worker in $(kubectl -n symphony get pods \
+            -l app=symphony-worker \
+            -o name); do
+            echo "Recent logs for ${worker}"
+            kubectl -n symphony logs "$worker" \
+              --since=20m \
+              --tail=200 2>&1 |
+              sed -E \
+                -e 's/((token|secret|password|authorization|cookie)[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+                -e 's/(Bearer[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' ||
+              true
+          done
+
+          echo "Previous orchestrator logs"
           kubectl -n symphony logs deployment/symphony-orchestrator \
             --previous \
             --tail=200 2>&1 |
