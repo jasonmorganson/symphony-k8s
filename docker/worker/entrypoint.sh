@@ -18,7 +18,7 @@ trim_secret() {
 
 verify_required_commands() {
   local command_name
-  for command_name in bash codex curl gh git mise sshd; do
+  for command_name in bash codex curl gh git mise sshd timeout; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
       echo "required worker command is unavailable: $command_name" >&2
       return 1
@@ -117,12 +117,34 @@ verify_codex_chatgpt_auth() {
   fi
 }
 
+verify_codex_chatgpt_session() {
+  local probe_output
+
+  if ! probe_output="$(runuser -u symphony -- \
+    env HOME="$SYMPHONY_HOME" \
+    timeout 60s \
+    codex exec \
+      --skip-git-repo-check \
+      --sandbox read-only \
+      --color never \
+      "Reply with exactly OK." 2>&1)"; then
+    echo "Codex ChatGPT session could not complete an authenticated request" >&2
+    return 1
+  fi
+
+  if ! grep -Fxq "OK" <<<"$probe_output"; then
+    echo "Codex ChatGPT session probe returned an unexpected response" >&2
+    return 1
+  fi
+}
+
 main() {
 trim_secret LINEAR_API_KEY
 verify_required_commands
 configure_github_auth
 verify_sshd_git_identity
 verify_codex_chatgpt_auth
+verify_codex_chatgpt_session
 
 mkdir -p "$SYMPHONY_WORKSPACE_ROOT" "$SYMPHONY_HOME/.ssh" /run/sshd
 chown -R symphony:symphony "$SYMPHONY_WORKSPACE_ROOT"
