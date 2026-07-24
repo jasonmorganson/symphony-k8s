@@ -192,6 +192,16 @@ wait_for_symphony_idle() {
     if ! state="$("$KUBECTL" get --raw "$SYMPHONY_STATE_PATH")"; then
       fail "unable to read Symphony state; refusing to deploy"
     fi
+    if ! printf '%s' "$state" | "$JQ" -e \
+      '(.tracker | type) == "object" and
+       (.tracker.observed_at | type) == "string" and
+       (.tracker.observed_at | length) > 0 and
+       (.tracker.runnable_issues | type) == "number" and
+       .tracker.runnable_issues >= 0 and
+       (.tracker.blocked_issues | type) == "number" and
+       .tracker.blocked_issues >= 0' >/dev/null; then
+      fail "Symphony tracker snapshot is uninitialized; refusing to deploy"
+    fi
     if ! running_count="$(printf '%s' "$state" | "$JQ" -er \
       'if (.running | type) == "array" then (.running | length) else error("running must be an array") end')"; then
       fail "invalid Symphony state; refusing to deploy"
