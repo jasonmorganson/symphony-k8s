@@ -138,6 +138,19 @@ verify_codex_chatgpt_session() {
   fi
 }
 
+install_workspace_branch_guards() {
+  local workspace
+
+  while IFS= read -r -d '' workspace; do
+    if [[ -e "$workspace/.git" ]]; then
+      runuser -u symphony -- env \
+        HOME="$SYMPHONY_HOME" \
+        SYMPHONY_WORKSPACE_ROOT="$SYMPHONY_WORKSPACE_ROOT" \
+        /usr/local/bin/install-workspace-branch-guard "$workspace"
+    fi
+  done < <(find "$SYMPHONY_WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -print0)
+}
+
 main() {
 trim_secret LINEAR_API_KEY
 verify_required_commands
@@ -150,6 +163,7 @@ mkdir -p "$SYMPHONY_WORKSPACE_ROOT" "$SYMPHONY_HOME/.ssh" /run/sshd
 chown -R symphony:symphony "$SYMPHONY_WORKSPACE_ROOT"
 chmod 0777 "$SYMPHONY_WORKSPACE_ROOT"
 chown symphony:symphony "$SYMPHONY_HOME" "$SYMPHONY_HOME/.ssh"
+install_workspace_branch_guards
 
 if [[ -f /etc/ssh/authorized-keys/authorized_keys ]]; then
   cp /etc/ssh/authorized-keys/authorized_keys "$SYMPHONY_HOME/.ssh/authorized_keys"
