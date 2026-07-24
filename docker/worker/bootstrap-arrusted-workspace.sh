@@ -6,6 +6,7 @@ workspace="${1:-$PWD}"
 repository_url="${ARRUSTED_REPOSITORY_URL:-https://github.com/withAutograph/arrusted-development.git}"
 git_bin="${GIT_BIN:-git}"
 mise_bin="${MISE_BIN:-mise}"
+branch_guard_installer="${BRANCH_GUARD_INSTALLER:-/usr/local/bin/install-workspace-branch-guard}"
 
 workspace_root="$(cd "$workspace_root" && pwd -P)"
 workspace="$(cd "$workspace" && pwd -P)"
@@ -55,5 +56,7 @@ if [[ "${SKIP_WORKTRUNK_HOOKS:-false}" != true ]] && command -v wt >/dev/null 2>
   wt hook post-create --yes || echo "wt post-create hook not configured; skipping." >&2
   wt hook post-start --yes || echo "wt post-start hook not configured; skipping." >&2
 fi
+
+"$branch_guard_installer" "$workspace"
 
 trap - EXIT
