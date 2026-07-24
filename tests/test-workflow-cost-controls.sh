@@ -58,5 +58,8 @@ grep -A5 'requests:' "$worker_patch" | grep -q 'memory: 4Gi'
 grep -A3 'limits:' "$worker_patch" | grep -q 'cpu: "4"'
 grep -A3 'limits:' "$worker_patch" | grep -q 'memory: 6Gi'
 grep -A2 'updateStrategy:' "$worker_statefulset" | grep -q 'type: OnDelete'
+grep -q 'mkdir -p /srv/worker-data/mise-data' "$worker_statefulset"
+grep -A2 'mountPath: /home/symphony/.local/share/mise' "$worker_statefulset" | \
+  grep -q 'subPath: mise-data'
 
 echo "workflow cost-control tests passed"
