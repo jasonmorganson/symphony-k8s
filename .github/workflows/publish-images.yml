@@ -2,12 +2,6 @@ name: Publish Symphony images
 
 on:
   workflow_dispatch:
-    inputs:
-      force_deploy:
-        description: Deploy without waiting for active Symphony sessions to drain
-        required: false
-        default: false
-        type: boolean
   pull_request:
     paths:
       - autoscaler/**
@@ -148,7 +142,7 @@ jobs:
           AUTOSCALER_IMAGE: ${{ needs.publish.outputs.autoscaler_image }}
           SOURCE_REVISION: ${{ github.sha }}
           DOKS_REFRESH_KUBECONFIG: "true"
-          SYMPHONY_WAIT_FOR_IDLE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_deploy && 'false' || 'true' }}
+          SYMPHONY_WAIT_FOR_IDLE: "true"
           SYMPHONY_IDLE_TIMEOUT_SECONDS: "3600"
           SYMPHONY_IDLE_POLL_SECONDS: "30"
         run: bash scripts/deploy-digitalocean.sh

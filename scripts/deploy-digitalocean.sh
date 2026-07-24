@@ -24,6 +24,9 @@ AUTOSCALER_IMAGE="${AUTOSCALER_IMAGE:-}"
 
 TEMP_DIR=""
 MUTATION_STARTED=0
+QUIESCE_STARTED=0
+ORIGINAL_AUTOSCALER_REPLICAS=""
+ORIGINAL_DRAINS_JSON=""
 
 emit_diagnostics() {
   if (( MUTATION_STARTED == 0 )); then
@@ -38,7 +41,10 @@ emit_diagnostics() {
 
 cleanup() {
   local status=$?
-  trap - EXIT
+  trap - EXIT INT TERM
+  if (( QUIESCE_STARTED == 1 )); then
+    restore_symphony_admissions || status=1
+  fi
   if (( status != 0 )); then
     emit_diagnostics
   fi
@@ -48,6 +54,8 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 fail() {
   echo "$*" >&2
@@ -87,6 +95,92 @@ refresh_kubeconfig() {
   fi
 }
 
+set_worker_drains() {
+  local desired_drains_json="$1"
+  local payload
+  local response
+
+  payload="$("$JQ" -cn --argjson hosts "$desired_drains_json" \
+    '{drained_worker_hosts: $hosts}')"
+  refresh_kubeconfig
+  if ! response="$(printf '%s' "$payload" | "$KUBECTL" -n symphony exec \
+    deployment/symphony-orchestrator -c orchestrator -i -- sh -c \
+    'curl --fail --silent --show-error -X PUT \
+      -H "Authorization: Bearer ${SYMPHONY_WORKER_DRAIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data-binary @- \
+      http://127.0.0.1:4000/api/v1/worker-drains')"; then
+    fail "unable to update Symphony worker drains"
+  fi
+  if ! printf '%s' "$response" | "$JQ" -e --argjson expected "$desired_drains_json" \
+    '(.drained_hosts | sort) == ($expected | sort) and
+      (.active_drained_hosts | type) == "array"' >/dev/null; then
+    fail "invalid Symphony worker drain acknowledgement"
+  fi
+}
+
+quiesce_symphony() {
+  local state
+  local configured_hosts_json
+
+  refresh_kubeconfig
+  state="$("$KUBECTL" get --raw "$SYMPHONY_STATE_PATH")"
+  configured_hosts_json="$(printf '%s' "$state" | "$JQ" -ce \
+    '.worker_pool.configured_hosts |
+      if type == "array" and length == (unique | length) and
+        all(.[]; type == "string" and length > 0)
+      then . else error("invalid configured worker hosts") end')"
+  ORIGINAL_DRAINS_JSON="$(printf '%s' "$state" | "$JQ" -ce \
+    --argjson configured "$configured_hosts_json" \
+    '.worker_pool.drained_hosts |
+      if type == "array" and length == (unique | length) and
+        all(.[]; . as $host |
+        type == "string" and ($configured | index($host)) != null)
+      then . else error("invalid drained worker hosts") end')"
+  ORIGINAL_AUTOSCALER_REPLICAS="$("$KUBECTL" -n symphony get \
+    deployment symphony-autoscaler -o jsonpath='{.spec.replicas}')"
+  require_nonnegative_integer "live Symphony autoscaler replicas" \
+    "$ORIGINAL_AUTOSCALER_REPLICAS"
+
+  QUIESCE_STARTED=1
+  MUTATION_STARTED=1
+  set_worker_drains "$configured_hosts_json"
+  refresh_kubeconfig
+  "$KUBECTL" -n symphony scale deployment/symphony-autoscaler --replicas=0
+  "$KUBECTL" -n symphony rollout status deployment/symphony-autoscaler --timeout=5m
+  set_worker_drains "$configured_hosts_json"
+}
+
+restore_symphony_admissions() {
+  local failed=0
+  local drains_restored=0
+
+  if (( QUIESCE_STARTED == 0 )); then
+    return
+  fi
+  for _attempt in 1 2 3; do
+    if set_worker_drains "$ORIGINAL_DRAINS_JSON"; then
+      drains_restored=1
+      break
+    fi
+    sleep 2
+  done
+  if (( drains_restored == 0 )); then
+    failed=1
+  fi
+  refresh_kubeconfig || failed=1
+  "$KUBECTL" -n symphony scale deployment/symphony-autoscaler \
+    --replicas="$ORIGINAL_AUTOSCALER_REPLICAS" || failed=1
+  if (( ORIGINAL_AUTOSCALER_REPLICAS > 0 )); then
+    "$KUBECTL" -n symphony rollout status deployment/symphony-autoscaler \
+      --timeout=10m || failed=1
+  fi
+  QUIESCE_STARTED=0
+  if (( failed != 0 )); then
+    fail "failed to restore Symphony admissions after deployment"
+  fi
+}
+
 wait_for_symphony_idle() {
   local deadline=$((SECONDS + SYMPHONY_IDLE_TIMEOUT_SECONDS))
   local state
@@ -115,6 +209,26 @@ wait_for_symphony_idle() {
     echo "waiting for active Symphony issues to finish: $running_issues" >&2
     sleep "$SYMPHONY_IDLE_POLL_SECONDS"
   done
+}
+
+validate_rendered_manifest() {
+  local manifest="$1"
+
+  if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]] &&
+      grep -Eq '^kind:[[:space:]]+Secret[[:space:]]*$' "$manifest"; then
+    fail "CD manifest unexpectedly contains a Secret"
+  fi
+  if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]] &&
+      grep -Eq '^  name:[[:space:]]+symphony-workflow[[:space:]]*$' "$manifest"; then
+    fail "CD manifest unexpectedly contains the runtime workflow ConfigMap"
+  fi
+  if (( image_override_count == 3 )); then
+    for image in "$ORCHESTRATOR_IMAGE" "$WORKER_IMAGE" "$AUTOSCALER_IMAGE"; do
+      if [[ "$(grep -Fc "image: $image" "$manifest")" != "1" ]]; then
+        fail "rendered manifest must contain exactly one workload image: $image"
+      fi
+    done
+  fi
 }
 
 require_boolean DEPLOY_BOOTSTRAP_RUNTIME "$DEPLOY_BOOTSTRAP_RUNTIME"
@@ -150,9 +264,6 @@ if [[ -n "$SOURCE_REVISION" && ! "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   fail "SOURCE_REVISION must be a full Git commit SHA"
 fi
 
-if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]]; then
-  wait_for_symphony_idle
-fi
 refresh_kubeconfig
 
 required_addons=(coredns konnectivity-agent)
@@ -211,24 +322,26 @@ fi
 rendered_manifest="$TEMP_DIR/rendered.yaml"
 "$KUSTOMIZE" build "$render_target" > "$rendered_manifest"
 
-if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]] &&
-    grep -Eq '^kind:[[:space:]]+Secret[[:space:]]*$' "$rendered_manifest"; then
-  fail "CD manifest unexpectedly contains a Secret"
-fi
-if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]] &&
-    grep -Eq '^  name:[[:space:]]+symphony-workflow[[:space:]]*$' "$rendered_manifest"; then
-  fail "CD manifest unexpectedly contains the runtime workflow ConfigMap"
-fi
-
-if (( image_override_count == 3 )); then
-  for image in "$ORCHESTRATOR_IMAGE" "$WORKER_IMAGE" "$AUTOSCALER_IMAGE"; do
-    if [[ "$(grep -Fc "image: $image" "$rendered_manifest")" != "1" ]]; then
-      fail "rendered manifest must contain exactly one workload image: $image"
-    fi
-  done
-fi
+validate_rendered_manifest "$rendered_manifest"
 
 "$KUBECTL" apply --dry-run=client -f "$rendered_manifest" >/dev/null
+
+if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]] &&
+    [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
+  quiesce_symphony
+  wait_for_symphony_idle
+  maintenance_autoscaler="$TEMP_DIR/autoscaler.yaml"
+  sed '1,/^  replicas: 1$/ s/^  replicas: 1$/  replicas: 0/' \
+    "$render_root/digitalocean/autoscaler.yaml" > "$maintenance_autoscaler"
+  mv "$maintenance_autoscaler" "$render_root/digitalocean/autoscaler.yaml"
+  if [[ "$(grep -Ec '^  replicas: 0$' \
+    "$render_root/digitalocean/autoscaler.yaml")" != "1" ]]; then
+    fail "unable to hold the Symphony autoscaler at zero during deployment"
+  fi
+  "$KUSTOMIZE" build "$render_target" > "$rendered_manifest"
+  validate_rendered_manifest "$rendered_manifest"
+  "$KUBECTL" apply --dry-run=client -f "$rendered_manifest" >/dev/null
+fi
 
 MUTATION_STARTED=1
 "$DOCTL" kubernetes cluster node-pool update "$DOKS_CLUSTER" "$WORKER_POOL" \
@@ -261,8 +374,13 @@ done
 
 refresh_kubeconfig
 "$KUBECTL" -n symphony rollout status deployment/symphony-orchestrator --timeout=10m
-refresh_kubeconfig
-"$KUBECTL" -n symphony rollout status deployment/symphony-autoscaler --timeout=10m
+
+if (( QUIESCE_STARTED == 1 )); then
+  restore_symphony_admissions
+else
+  refresh_kubeconfig
+  "$KUBECTL" -n symphony rollout status deployment/symphony-autoscaler --timeout=10m
+fi
 
 if (( image_override_count == 3 )); then
   deployed_worker_image="$("$KUBECTL" -n symphony get statefulset symphony-worker \

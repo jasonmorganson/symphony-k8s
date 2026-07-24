@@ -429,8 +429,13 @@ docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712
 
 Merges to `master` automatically build all three images, resolve immutable
 digests, wait up to 60 minutes for Symphony's `.running` list to become empty,
-and deploy through GitHub Actions. Retrying issues do not block a rollout. An
-unavailable or malformed state endpoint fails closed before any provider or
+and deploy through GitHub Actions. Before waiting for idle, deployment snapshots
+the existing worker drains, pauses the autoscaler, and drains every worker from
+new admissions. Active sessions continue normally; retrying issues do not block a
+rollout. The deployment holds the autoscaler at zero through the orchestrator
+rollout, then restores the exact prior drains and autoscaler replica count on
+success or failure. An unavailable or malformed state endpoint fails closed
+before any provider or
 cluster mutation. The `production` GitHub environment supplies
 `DIGITALOCEAN_ACCESS_TOKEN`; restrict that token to
 `kubernetes:access_cluster`, `kubernetes:update`, and the required read scopes.
