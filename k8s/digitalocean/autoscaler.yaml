@@ -100,6 +100,8 @@ spec:
               value: "1200"
             - name: TRACKER_DEMAND_MAX_AGE_SECONDS
               value: "300"
+            - name: RETRY_CAPACITY_WARMUP_SECONDS
+              value: "300"
             - name: USAGE_LEDGER_PATH
               value: /var/lib/symphony-metrics/usage.json
           ports:
