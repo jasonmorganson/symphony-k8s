@@ -991,7 +991,7 @@ class Scaler:
                             current=current, drained=drained_count,
                             cooldown=cooldown)
 
-    def run_once(self):
+    def run_once(self, reconcile_handoff=True):
         try:
             self.reconcile()
             self.metrics["last_success_timestamp"] = int(self.wall_clock())
@@ -1013,7 +1013,7 @@ class Scaler:
                 "error": str(error),
                 "timestamp": timestamp,
             }, sort_keys=True), file=sys.stderr, flush=True)
-        if not hasattr(self, "approval_handoff"):
+        if not reconcile_handoff or not hasattr(self, "approval_handoff"):
             return
         handoff = self.approval_handoff
         if handoff is None:
@@ -1125,8 +1125,16 @@ def main():
     server = ThreadingHTTPServer(("0.0.0.0", 8080), MetricsHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     interval = int(os.getenv("POLL_INTERVAL_SECONDS", "15"))
+    handoff_interval = int(os.getenv("APPROVAL_HANDOFF_POLL_SECONDS", "60"))
+    if interval <= 0 or handoff_interval <= 0:
+        raise ValueError("autoscaler poll intervals must be positive")
+    next_handoff_at = 0.0
     while True:
-        scaler.run_once()
+        now = time.monotonic()
+        reconcile_handoff = now >= next_handoff_at
+        scaler.run_once(reconcile_handoff=reconcile_handoff)
+        if reconcile_handoff:
+            next_handoff_at = now + handoff_interval
         time.sleep(interval)
 
 
