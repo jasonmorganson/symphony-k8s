@@ -322,6 +322,39 @@ class WorkerPoolActivityTest(unittest.TestCase):
         self.assertEqual(worker_pool_activity(state, 3),
                          (2, 3, ["symphony-worker-0", "symphony-worker-1", "symphony-worker-2"]))
 
+    def test_future_retries_reserve_capacity_only_inside_warmup_window(self):
+        hosts = [f"symphony-worker-{index}" for index in range(3)]
+        state = {
+            "counts": {"running": 1, "retrying": 2},
+            "running": [{"worker_host": hosts[0]}],
+            "retrying": [
+                {"worker_host": hosts[1], "due_at": "2026-07-24T01:05:00Z"},
+                {"worker_host": hosts[2], "due_at": "2026-07-24T02:00:00Z"},
+            ],
+            "worker_pool": {"configured_hosts": hosts, "drained_hosts": []},
+        }
+        now = datetime.fromisoformat("2026-07-24T01:00:00+00:00").timestamp()
+        self.assertEqual(
+            worker_pool_activity(state, 3, now=now, retry_warmup_seconds=300),
+            (2, 2, hosts))
+
+    def test_retry_without_valid_due_at_remains_conservatively_counted(self):
+        hosts = [f"symphony-worker-{index}" for index in range(3)]
+        for due_at in (None, "", "not-a-timestamp", "2026-07-24T01:05:00"):
+            retry = {"worker_host": hosts[2]}
+            if due_at is not None:
+                retry["due_at"] = due_at
+            state = {
+                "counts": {"running": 0, "retrying": 1},
+                "running": [],
+                "retrying": [retry],
+                "worker_pool": {"configured_hosts": hosts, "drained_hosts": []},
+            }
+            with self.subTest(due_at=due_at):
+                self.assertEqual(
+                    worker_pool_activity(state, 3, now=0),
+                    (1, 3, hosts))
+
     def test_reordered_or_wrong_statefulset_hosts_fail_closed(self):
         for configured in (
                 ["symphony-worker-1", "symphony-worker-0"],
@@ -867,11 +900,13 @@ class FakeScaler(Scaler):
         self.agents_per_worker = 1
         self.cooldown_seconds = 1200
         self.tracker_demand_max_age_seconds = 300
+        self.retry_capacity_warmup_seconds = 300
         self.symphony_drain_token = "d" * 32
         self.low_demand_since = None
         self.issues = 0
         self.busy = 0
         self.active_hosts = []
+        self.retrying = []
         self.statefulset = "symphony-worker"
         self.configured_hosts = [f"symphony-worker-{index}" for index in range(5)]
         self.ready = 2
@@ -903,9 +938,9 @@ class FakeScaler(Scaler):
             raise RuntimeError("symphony unavailable")
         running = [{"worker_host": host} for host in self.active_hosts]
         state = {
-            "counts": {"running": len(running), "retrying": 0},
+            "counts": {"running": len(running), "retrying": len(self.retrying)},
             "running": running,
-            "retrying": [],
+            "retrying": self.retrying,
             "worker_pool": {"configured_hosts": self.configured_hosts, "drained_hosts": self.drains},
             "tracker": {
                 "runnable_issues": self.issues,
@@ -939,6 +974,28 @@ class FakeScaler(Scaler):
 
 
 class ReconcileTest(unittest.TestCase):
+    def test_future_retries_do_not_hold_scaled_workers_during_linear_cooldown(self):
+        scaler = FakeScaler()
+        scaler.maximum = 10
+        scaler.configured_hosts = [f"symphony-worker-{index}" for index in range(10)]
+        scaler.workers = 8
+        scaler.ready = 8
+        scaler.issues = 8
+        scaler.active_hosts = scaler.configured_hosts[:3]
+        scaler.retrying = [
+            {
+                "worker_host": host,
+                "due_at": "2026-07-24T02:00:00Z",
+            }
+            for host in scaler.configured_hosts[3:8]
+        ]
+
+        scaler.run_once()
+
+        self.assertEqual(scaler.changes, [3])
+        self.assertEqual(scaler.metrics["queue"], 3)
+        self.assertEqual(scaler.metrics["desired"], 3)
+
     def test_handoff_initialization_failures_leave_capacity_operational_and_retry(self):
         linear_environment = {
             "LINEAR_API_KEY": "linear",

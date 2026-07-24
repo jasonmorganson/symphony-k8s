@@ -223,7 +223,8 @@ def tracker_demand(state, now=None, maximum_age_seconds=None):
     return runnable, blocked
 
 
-def worker_pool_activity(state, current_workers, statefulset="symphony-worker"):
+def worker_pool_activity(state, current_workers, statefulset="symphony-worker",
+                         now=None, retry_warmup_seconds=300):
     if not isinstance(state, dict) or not isinstance(state.get("counts"), dict) \
             or not isinstance(state.get("running"), list) or not isinstance(state.get("retrying"), list):
         raise ValueError("invalid Symphony activity state")
@@ -239,6 +240,8 @@ def worker_pool_activity(state, current_workers, statefulset="symphony-worker"):
         raise ValueError("inconsistent Symphony worker pool state")
     if len(set(configured)) != len(configured):
         raise ValueError("duplicate Symphony worker hosts")
+    if type(retry_warmup_seconds) is not int or retry_warmup_seconds < 0:
+        raise ValueError("retry capacity warm-up seconds must be a nonnegative integer")
     for ordinal, host in enumerate(configured):
         if host.split(".", 1)[0] != f"{statefulset}-{ordinal}":
             raise ValueError("Symphony worker hosts do not match StatefulSet ordinals")
@@ -249,14 +252,35 @@ def worker_pool_activity(state, current_workers, statefulset="symphony-worker"):
             or running_count != len(state["running"]) \
             or retrying_count != len(state["retrying"]):
         raise ValueError("inconsistent Symphony activity counts")
-    active_hosts = []
     for session in state["running"] + state["retrying"]:
         host = session.get("worker_host") if isinstance(session, dict) else None
         if host not in configured:
             raise ValueError("active Symphony session has unknown worker placement")
-        active_hosts.append(host)
+    active_sessions = list(state["running"])
+    for retry in state["retrying"]:
+        due_at = retry.get("due_at") if isinstance(retry, dict) else None
+        due_timestamp = None
+        if isinstance(due_at, str) and due_at:
+            try:
+                due_timestamp = datetime.fromisoformat(
+                    due_at.replace("Z", "+00:00"))
+                if due_timestamp.tzinfo is None:
+                    due_timestamp = None
+                else:
+                    due_timestamp = due_timestamp.astimezone(
+                        timezone.utc).timestamp()
+            except (OverflowError, ValueError):
+                pass
+        # Missing or malformed deadlines stay conservative. Valid future
+        # retries reserve capacity only shortly before they become runnable.
+        if due_timestamp is None or now is None \
+                or due_timestamp <= now + retry_warmup_seconds:
+            active_sessions.append(retry)
+    active_hosts = []
+    for session in active_sessions:
+        active_hosts.append(session["worker_host"])
     floor = max((configured.index(host) + 1 for host in active_hosts), default=0)
-    return running_count + retrying_count, floor, configured
+    return len(active_sessions), floor, configured
 
 
 def load_requester_policy(path):
@@ -750,6 +774,10 @@ class Scaler:
         self.cooldown_seconds = int(os.getenv("SCALE_DOWN_COOLDOWN_SECONDS", "1200"))
         self.tracker_demand_max_age_seconds = int(
             os.getenv("TRACKER_DEMAND_MAX_AGE_SECONDS", "300"))
+        self.retry_capacity_warmup_seconds = int(
+            os.getenv("RETRY_CAPACITY_WARMUP_SECONDS", "300"))
+        if self.retry_capacity_warmup_seconds < 0:
+            raise ValueError("RETRY_CAPACITY_WARMUP_SECONDS must be nonnegative")
         self.kube_host = os.environ["KUBERNETES_SERVICE_HOST"]
         self.kube_port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS", "443")
         self.token = open("/var/run/secrets/kubernetes.io/serviceaccount/token", encoding="utf-8").read().strip()
@@ -879,7 +907,8 @@ class Scaler:
         state = self.at_stage("symphony_state", self.symphony_state)
         current, resource_version = self.at_stage("kubernetes_scale_read", self.current_workers)
         busy, active_floor, configured_hosts = self.at_stage(
-            "state_validation", worker_pool_activity, state, current, self.statefulset)
+            "state_validation", worker_pool_activity, state, current, self.statefulset,
+            self.wall_clock(), self.retry_capacity_warmup_seconds)
         try:
             issue_count, blocked_count = self.at_stage(
                 "tracker_demand", tracker_demand, state,
@@ -888,6 +917,15 @@ class Scaler:
             if busy == 0:
                 raise
             issue_count, blocked_count = busy, 0
+        else:
+            # The tracker snapshot is a count of all active-state Linear
+            # issues, including issues already represented in the retry queue.
+            # Remove retries that are intentionally deferred beyond the
+            # capacity warm-up window, while never undercutting running or
+            # imminently retrying runtime activity.
+            runtime_count = state["counts"]["running"] + state["counts"]["retrying"]
+            deferred_retries = runtime_count - busy
+            issue_count = max(busy, issue_count - deferred_retries)
         ready = self.at_stage("kubernetes_pods", self.ready_workers, configured_hosts, current)
         target = self.at_stage(
             "demand_calculation", desired_workers,
