@@ -255,6 +255,8 @@ restore_line="$(grep -nF -- \
 (( scale_down_line < apply_line && apply_line < restore_line ))
 first_drain_line="$(grep -nF 'drain:["worker-0","worker-1"]' \
   "$EVENT_LOG" | head -1 | cut -d: -f1)"
+first_idle_poll_line="$(grep -nF 'kubectl:get --raw ' "$EVENT_LOG" |
+  head -1 | cut -d: -f1)"
 scale_down_event_line="$(grep -nF \
   'kubectl:-n symphony scale deployment/symphony-autoscaler --replicas=0' \
   "$EVENT_LOG" | head -1 | cut -d: -f1)"
@@ -263,17 +265,18 @@ scale_down_ready_line="$(grep -nF \
   "$EVENT_LOG" | head -1 | cut -d: -f1)"
 second_drain_line="$(grep -nF 'drain:["worker-0","worker-1"]' \
   "$EVENT_LOG" | tail -1 | cut -d: -f1)"
-idle_poll_line="$(grep -nF 'kubectl:get --raw ' "$EVENT_LOG" |
+post_quiesce_idle_poll_line="$(grep -nF 'kubectl:get --raw ' "$EVENT_LOG" |
   tail -1 | cut -d: -f1)"
 apply_event_line="$(grep -nF 'kubectl:apply -f ' "$EVENT_LOG" |
   head -1 | cut -d: -f1)"
 restore_drain_line="$(grep -nF 'drain:[]' "$EVENT_LOG" |
   tail -1 | cut -d: -f1)"
-(( first_drain_line < scale_down_event_line &&
+(( first_idle_poll_line < first_drain_line &&
+   first_drain_line < scale_down_event_line &&
    scale_down_event_line < scale_down_ready_line &&
    scale_down_ready_line < second_drain_line &&
-   second_drain_line < idle_poll_line &&
-   idle_poll_line < apply_event_line &&
+   second_drain_line < post_quiesce_idle_poll_line &&
+   post_quiesce_idle_poll_line < apply_event_line &&
    apply_event_line < restore_drain_line ))
 grep -F "annotate --overwrite deployment/symphony-orchestrator deployment/symphony-autoscaler statefulset/symphony-worker symphony.morganson.me/source-revision=$SOURCE_REVISION" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-orchestrator --timeout=10m" "$KUBECTL_LOG"
@@ -296,7 +299,7 @@ grep -F "kubernetes cluster kubeconfig save --expiry-seconds 600 symphony-k8s" "
 
 reset_logs
 STATE_MODE=busy_then_idle run_deploy
-[[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "2" ]]
+[[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "4" ]]
 jq -se '.[-1].drained_worker_hosts == ["worker-1"]' "$DRAIN_LOG" >/dev/null
 grep -F "kubernetes cluster node-pool update symphony-k8s symphony-ha --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
 
@@ -306,7 +309,11 @@ if STATE_MODE=busy SYMPHONY_IDLE_TIMEOUT_SECONDS=0 run_deploy; then
   exit 1
 fi
 [[ ! -s "$DOCTL_LOG" ]]
-jq -se '.[-1].drained_worker_hosts == []' "$DRAIN_LOG" >/dev/null
+[[ ! -s "$DRAIN_LOG" ]]
+if grep -F "scale deployment/symphony-autoscaler" "$KUBECTL_LOG"; then
+  echo "busy Symphony must not change autoscaler state" >&2
+  exit 1
+fi
 if grep -F "apply -f " "$KUBECTL_LOG"; then
   echo "busy Symphony must fail before applying resources" >&2
   exit 1

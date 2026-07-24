@@ -328,6 +328,10 @@ validate_rendered_manifest "$rendered_manifest"
 
 if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]] &&
     [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
+  # Do not strand active work behind a deployment gate. Wait for the runtime to
+  # become idle before changing admissions, then quiesce and check once more to
+  # close the race with an issue admitted after the first idle observation.
+  wait_for_symphony_idle
   quiesce_symphony
   wait_for_symphony_idle
   maintenance_autoscaler="$TEMP_DIR/autoscaler.yaml"
