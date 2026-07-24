@@ -73,7 +73,7 @@ spec:
             - "--i-understand-that-this-will-be-running-without-the-usual-guardrails"
             - "--port"
             - "4001"
-            - "./WORKFLOW.md"
+            - "/etc/symphony-workflow/WORKFLOW.md"
           ports:
             - name: http
               containerPort: 4000
@@ -115,8 +115,7 @@ spec:
               value: +fnu
           volumeMounts:
             - name: workflow
-              mountPath: /app/WORKFLOW.md
-              subPath: WORKFLOW.md
+              mountPath: /etc/symphony-workflow
               readOnly: true
             - name: orchestrator-workspaces
               mountPath: /srv/symphony/workspaces
