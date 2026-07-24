@@ -1,0 +1,66 @@
+name: Diagnose Symphony production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    environment:
+      name: production
+      url: https://symphony.morganson.me
+    concurrency:
+      group: production-doks-diagnostics
+      cancel-in-progress: false
+    steps:
+      - uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Fetch short-lived cluster credentials
+        run: |
+          doctl kubernetes cluster kubeconfig save \
+            --expiry-seconds 600 \
+            symphony-k8s >/dev/null
+      - name: Collect non-secret runtime diagnostics
+        run: |
+          set -euo pipefail
+
+          kubectl -n symphony get deployment,statefulset,pods -o wide
+          kubectl -n symphony get pods -o json | jq '{
+            pods: [
+              .items[] |
+              {
+                name: .metadata.name,
+                phase: .status.phase,
+                node: .spec.nodeName,
+                conditions: [
+                  .status.conditions[]? |
+                  select(.type == "Ready" or .type == "PodScheduled") |
+                  {type, status, reason, message}
+                ],
+                containers: [
+                  .status.containerStatuses[]? |
+                  {
+                    name,
+                    ready,
+                    restartCount,
+                    state,
+                    lastState
+                  }
+                ]
+              }
+            ]
+          }'
+          kubectl -n symphony get events \
+            --sort-by=.metadata.creationTimestamp \
+            --field-selector type=Warning
+          kubectl -n symphony logs deployment/symphony-orchestrator \
+            --previous \
+            --tail=200 2>&1 |
+            sed -E \
+              -e 's/((token|secret|password|authorization|cookie)[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+              -e 's/(Bearer[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' ||
+            true
