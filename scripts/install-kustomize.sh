@@ -10,12 +10,22 @@ RELEASE_URL="https://github.com/kubernetes-sigs/kustomize/releases/download/kust
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-curl --fail --silent --show-error --location \
-  "$RELEASE_URL/$ASSET" \
-  --output "$TEMP_DIR/$ASSET"
-curl --fail --silent --show-error --location \
-  "$RELEASE_URL/checksums.txt" \
-  --output "$TEMP_DIR/checksums.txt"
+download() {
+  local url="$1"
+  local output="$2"
+
+  curl --fail --silent --show-error --location \
+    --connect-timeout 15 \
+    --retry 5 \
+    --retry-all-errors \
+    --retry-delay 2 \
+    --retry-max-time 90 \
+    "$url" \
+    --output "$output"
+}
+
+download "$RELEASE_URL/$ASSET" "$TEMP_DIR/$ASSET"
+download "$RELEASE_URL/checksums.txt" "$TEMP_DIR/checksums.txt"
 
 expected_checksum="$(awk -v asset="$ASSET" '$2 == asset { print $1 }' "$TEMP_DIR/checksums.txt")"
 if [[ ! "$expected_checksum" =~ ^[0-9a-f]{64}$ ]]; then

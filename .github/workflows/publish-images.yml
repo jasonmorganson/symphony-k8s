@@ -50,6 +50,8 @@ jobs:
         run: bash tests/test-workflow-cost-controls.sh
       - name: Test DOKS deployment hardening
         run: bash tests/test-doks-deploy.sh
+      - name: Test Kustomize installer retries
+        run: bash tests/test-install-kustomize.sh
       - name: Test Kustomize deployment boundaries
         env:
           KUSTOMIZE: kustomize build
