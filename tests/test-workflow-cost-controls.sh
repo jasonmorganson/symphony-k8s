@@ -7,8 +7,10 @@ worker_statefulset="$ROOT_DIR/k8s/base/worker-statefulset.yaml"
 orchestrator_deployment="$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
 runtime="$ROOT_DIR/config/workflow-runtime.yaml"
 generator="$ROOT_DIR/scripts/generate-skaffold-inputs.sh"
+throughput_overlay="$ROOT_DIR/config/workflow-throughput-overlay.md"
 autoscaler="$ROOT_DIR/k8s/digitalocean/autoscaler.yaml"
 kustomization="$ROOT_DIR/k8s/kustomization.yaml"
+release_dockerfile="$ROOT_DIR/docker/release/Dockerfile"
 
 grep -q '^worker:$' "$runtime"
 grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$runtime"
@@ -19,18 +21,29 @@ for state in 'In Progress' Merging Rework; do
     grep -q "^    $state: 60000$"
 done
 grep -A3 '^  dispatch_state_order:' "$runtime" | grep -q -- '- Merging'
+grep -A3 '^  dispatch_priority_labels:' "$runtime" | grep -q -- '- production-gate'
+grep -A3 '^  dispatch_priority_labels:' "$runtime" | grep -q -- '- main-ci'
 grep -q '^  root: /srv/symphony/workspaces$' "$runtime"
 grep -q -- '--model gpt-5.6 app-server' "$runtime"
 grep -q 'model_reasoning_effort=medium' "$runtime"
 grep -q 'agents.max_threads=3' "$runtime"
 grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$runtime"
+grep -q '^ARG SYMPHONY_COMMIT=354dd2dae6cb0ba287bd37d4c035229048259e7c$' \
+  "$release_dockerfile"
 grep -A1 '^hooks:$' "$runtime" | grep -q '^  timeout_ms: 600000$'
-grep -q 'workflow_body=.*awk' "$generator"
+grep -q 'render-workflow.sh' "$generator"
+grep -q 'workflow-throughput-overlay.md' "$generator"
 grep -q "SYMPHONY_WORKFLOW_FILE" "$generator"
 grep -q 'SYMPHONY_WORKER_DRAIN_TOKEN' "$generator"
 grep -q 'requester-policy.json' "$generator"
 grep -q 'workflow-source.json' "$generator"
 grep -q 'SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE' "$generator"
+grep -q '^## External-wait checkpoint$' "$throughput_overlay"
+grep -q '^## Shared-gate repair classification$' "$throughput_overlay"
+grep -q 'During normal Symphony workpad reconciliation' "$throughput_overlay"
+grep -q 'add its missing matching label through the workflow' "$throughput_overlay"
+grep -q 'same workflow-owned create/update sequence' "$throughput_overlay"
+grep -q 'Do not rely on an operator, monitor, or other' "$throughput_overlay"
 grep -q 'requester-policy.json=base/generated/skaffold/workflow/requester-policy.json' "$kustomization"
 grep -q 'workflow-source.json=base/generated/skaffold/workflow/workflow-source.json' "$kustomization"
 grep -A4 'name: GITHUB_TOKEN' "$autoscaler" | grep -q 'name: github-machine-arrusted-symphony'

@@ -42,6 +42,8 @@ jobs:
         run: bash tests/test-workspace-bootstrap.sh
       - name: Test workflow cost controls
         run: bash tests/test-workflow-cost-controls.sh
+      - name: Test workflow overlay rendering
+        run: bash tests/test-workflow-overlay.sh
       - name: Test DOKS deployment hardening
         run: bash tests/test-doks-deploy.sh
       - name: Test Kustomize installer retries

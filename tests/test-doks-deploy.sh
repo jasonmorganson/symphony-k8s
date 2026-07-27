@@ -39,6 +39,21 @@ if [[ "$*" == "get --raw "* ]]; then
       printf '%s\n' \
         '{"running":[],"retrying":[],"tracker":null,"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
       ;;
+    uninitialized_then_idle)
+      count=0
+      if [[ -f "$STATE_COUNT_FILE" ]]; then
+        count="$(cat "$STATE_COUNT_FILE")"
+      fi
+      count=$((count + 1))
+      printf '%s\n' "$count" > "$STATE_COUNT_FILE"
+      if (( count == 1 )); then
+        printf '%s\n' \
+          '{"running":[],"retrying":[],"tracker":null,"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
+      else
+        printf '{"running":[],"retrying":[],"tracker":{"observed_at":"2026-07-24T22:00:00Z","runnable_issues":0,"blocked_issues":0},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":%s}}\n' \
+          "${INITIAL_DRAINS_JSON:-[]}"
+      fi
+      ;;
     invalid)
       printf '%s\n' '{"running":"not-an-array"}'
       ;;
@@ -308,6 +323,11 @@ jq -se '.[-1].drained_worker_hosts == ["worker-1"]' "$DRAIN_LOG" >/dev/null
 grep -F "kubernetes cluster node-pool update symphony-k8s symphony-ha --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
 
 reset_logs
+STATE_MODE=uninitialized_then_idle run_deploy
+[[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "4" ]]
+grep -F "apply -f " "$KUBECTL_LOG" >/dev/null
+
+reset_logs
 if STATE_MODE=busy SYMPHONY_IDLE_TIMEOUT_SECONDS=0 run_deploy; then
   echo "busy Symphony must fail at the idle deadline" >&2
   exit 1
@@ -323,7 +343,7 @@ if grep -F "apply -f " "$KUBECTL_LOG"; then
   exit 1
 fi
 
-for state_mode in invalid unavailable uninitialized; do
+for state_mode in invalid unavailable; do
   reset_logs
   if STATE_MODE="$state_mode" run_deploy; then
     echo "$state_mode Symphony state must fail closed" >&2
@@ -339,6 +359,18 @@ for state_mode in invalid unavailable uninitialized; do
     exit 1
   fi
 done
+
+reset_logs
+if STATE_MODE=uninitialized SYMPHONY_IDLE_TIMEOUT_SECONDS=0 run_deploy; then
+  echo "persistently uninitialized Symphony tracker must fail at the idle deadline" >&2
+  exit 1
+fi
+[[ ! -s "$DOCTL_LOG" ]]
+if grep -F "scale deployment/symphony-autoscaler" "$KUBECTL_LOG" ||
+    grep -F "apply -f " "$KUBECTL_LOG"; then
+  echo "uninitialized Symphony tracker must not mutate provider or cluster state" >&2
+  exit 1
+fi
 
 reset_logs
 if DRAIN_ACK_INVALID=1 run_deploy; then
