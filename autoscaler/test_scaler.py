@@ -457,6 +457,60 @@ class CurrentWorkersTest(unittest.TestCase):
                 self.scaler_with_response(response).current_workers()
 
 
+class ReadyWorkersTest(unittest.TestCase):
+    def scaler_with_pods(self, items):
+        scaler = Scaler.__new__(Scaler)
+        scaler.token = "token"
+        scaler.ssl_context = object()
+        scaler.request_json = mock.Mock(return_value={"items": items})
+        scaler.pods_url = mock.Mock(return_value="https://kubernetes/pods")
+        return scaler
+
+    @staticmethod
+    def pod(name, *, phase="Running", pod_ready=True, worker_ready=True,
+            deleting=False):
+        metadata = {"name": name}
+        if deleting:
+            metadata["deletionTimestamp"] = "2026-07-27T00:00:00Z"
+        return {
+            "metadata": metadata,
+            "status": {
+                "phase": phase,
+                "conditions": [{"type": "Ready",
+                                "status": "True" if pod_ready else "False"}],
+                "containerStatuses": [{"name": "worker", "ready": worker_ready}],
+            },
+        }
+
+    def test_counts_only_contiguous_authenticated_ready_workers(self):
+        scaler = self.scaler_with_pods([
+            self.pod("symphony-worker-0"),
+            self.pod("symphony-worker-1", worker_ready=False),
+            self.pod("symphony-worker-2"),
+        ])
+        hosts = [f"symphony-worker-{index}" for index in range(3)]
+        self.assertEqual(scaler.ready_workers(hosts, 3), 1)
+
+    def test_excludes_terminating_and_nonrunning_workers(self):
+        hosts = ["symphony-worker-0"]
+        for pod in (
+                self.pod("symphony-worker-0", deleting=True),
+                self.pod("symphony-worker-0", phase="Pending"),
+                self.pod("symphony-worker-0", pod_ready=False)):
+            with self.subTest(pod=pod):
+                self.assertEqual(
+                    self.scaler_with_pods([pod]).ready_workers(hosts, 1), 0)
+
+    def test_malformed_pod_list_fails_closed(self):
+        scaler = Scaler.__new__(Scaler)
+        scaler.token = "token"
+        scaler.ssl_context = object()
+        scaler.request_json = mock.Mock(return_value={})
+        scaler.pods_url = mock.Mock(return_value="https://kubernetes/pods")
+        with self.assertRaisesRegex(ValueError, "Pods response"):
+            scaler.ready_workers(["symphony-worker-0"], 1)
+
+
 class ApprovalHandoffTest(unittest.TestCase):
     def setUp(self):
         self.policy = requester_policy()

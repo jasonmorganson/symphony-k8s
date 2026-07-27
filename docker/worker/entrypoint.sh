@@ -7,6 +7,7 @@ ARRUSTED_REPOSITORY_URL="${ARRUSTED_REPOSITORY_URL:-https://github.com/withAutog
 GITHUB_MACHINE_LOGIN="autograph-symphony"
 GITHUB_MACHINE_NAME="autograph-symphony"
 GITHUB_MACHINE_EMAIL="jason+symphony@withgraph.com"
+CODEX_AUTH_SOURCE="${CODEX_AUTH_SOURCE:-/etc/symphony/codex-auth/auth.json}"
 
 trim_secret() {
   local name="$1" value
@@ -24,6 +25,33 @@ verify_required_commands() {
       return 1
     fi
   done
+}
+
+ensure_runtime_permissions() {
+  install -d -m 0755 -o symphony -g symphony \
+    "$SYMPHONY_HOME/.local" \
+    "$SYMPHONY_HOME/.local/share" \
+    "$SYMPHONY_HOME/.local/share/mise" \
+    "$SYMPHONY_HOME/.local/state" \
+    "$SYMPHONY_HOME/.local/state/mise"
+  chown -R symphony:symphony \
+    "$SYMPHONY_HOME/.local" \
+    "$SYMPHONY_HOME/.codex"
+}
+
+synchronize_codex_auth() {
+  local auth_target="$SYMPHONY_HOME/.codex/auth.json"
+  local auth_temporary="$auth_target.next"
+
+  if [[ ! -s "$CODEX_AUTH_SOURCE" ]]; then
+    echo "canonical Codex ChatGPT authentication is unavailable" >&2
+    return 1
+  fi
+  install -d -m 0700 -o symphony -g symphony "$SYMPHONY_HOME/.codex"
+  cp "$CODEX_AUTH_SOURCE" "$auth_temporary"
+  chown symphony:symphony "$auth_temporary"
+  chmod 0600 "$auth_temporary"
+  mv "$auth_temporary" "$auth_target"
 }
 
 configure_github_auth() {
@@ -138,6 +166,17 @@ verify_codex_chatgpt_session() {
   fi
 }
 
+ensure_codex_chatgpt_session() {
+  if verify_codex_chatgpt_auth && verify_codex_chatgpt_session; then
+    return 0
+  fi
+
+  echo "Persisted Codex ChatGPT session is unusable; restoring canonical authentication" >&2
+  synchronize_codex_auth
+  verify_codex_chatgpt_auth
+  verify_codex_chatgpt_session
+}
+
 install_workspace_branch_guards() {
   local workspace
 
@@ -154,10 +193,10 @@ install_workspace_branch_guards() {
 main() {
 trim_secret LINEAR_API_KEY
 verify_required_commands
+ensure_runtime_permissions
 configure_github_auth
 verify_sshd_git_identity
-verify_codex_chatgpt_auth
-verify_codex_chatgpt_session
+ensure_codex_chatgpt_session
 
 mkdir -p "$SYMPHONY_WORKSPACE_ROOT" "$SYMPHONY_HOME/.ssh" /run/sshd
 chown -R symphony:symphony "$SYMPHONY_WORKSPACE_ROOT"

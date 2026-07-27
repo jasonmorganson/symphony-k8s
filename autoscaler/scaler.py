@@ -890,11 +890,28 @@ class Scaler:
         pods = self.request_json(self.pods_url(), headers={"Authorization": f"Bearer {self.token}"},
                                  context=self.ssl_context)
         ready_names = set()
-        for pod in pods.get("items", []):
+        items = pods.get("items") if isinstance(pods, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("invalid Kubernetes Pods response")
+        for pod in items:
+            if not isinstance(pod, dict):
+                raise ValueError("invalid Kubernetes worker Pod")
             name = pod.get("metadata", {}).get("name")
             conditions = pod.get("status", {}).get("conditions", [])
-            if any(condition.get("type") == "Ready" and condition.get("status") == "True"
-                   for condition in conditions):
+            container_statuses = pod.get("status", {}).get("containerStatuses", [])
+            worker_status = next((
+                status for status in container_statuses
+                if isinstance(status, dict) and status.get("name") == "worker"
+            ), None)
+            if pod.get("metadata", {}).get("deletionTimestamp") is None \
+                    and pod.get("status", {}).get("phase") == "Running" \
+                    and isinstance(conditions, list) \
+                    and any(isinstance(condition, dict)
+                            and condition.get("type") == "Ready"
+                            and condition.get("status") == "True"
+                            for condition in conditions) \
+                    and isinstance(worker_status, dict) \
+                    and worker_status.get("ready") is True:
                 ready_names.add(name)
         ready = 0
         for host in configured_hosts[:current_workers]:
@@ -986,9 +1003,10 @@ class Scaler:
             drained_count = len(self.at_stage(
                 "symphony_drains", self.set_worker_drains,
                 configured_hosts[min(ready, current):])["drained_hosts"])
+        ready = min(ready, current)
         cooldown = 0 if self.low_demand_since is None else max(0, self.cooldown_seconds - int(now - self.low_demand_since))
         self.metrics.update(healthy=1, desired=target, queue=issue_count, blocked=blocked_count,
-                            current=current, drained=drained_count,
+                            current=current, ready=ready, drained=drained_count,
                             cooldown=cooldown)
 
     def run_once(self, reconcile_handoff=True):
@@ -1054,6 +1072,7 @@ def metrics_lines(scaler):
         f'symphony_autoscaler_healthy {metrics["healthy"]}',
         f'symphony_autoscaler_desired_workers {metrics["desired"]}',
         f'symphony_autoscaler_current_workers {metrics["current"]}',
+        f'symphony_autoscaler_ready_workers {metrics.get("ready", 0)}',
         f'symphony_autoscaler_drained_workers {metrics["drained"]}',
         f'symphony_autoscaler_runnable_issues {metrics["queue"]}',
         f'symphony_autoscaler_blocked_issues {metrics["blocked"]}',

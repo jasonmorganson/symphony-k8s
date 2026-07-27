@@ -54,14 +54,19 @@ spec:
             - |
               mkdir -p /srv/symphony/workspaces
               mkdir -p /srv/worker-data/codex-home
-              mkdir -p /srv/worker-data/mise-data
+              mkdir -p /srv/worker-data/local-home/share/mise
+              mkdir -p /srv/worker-data/local-home/state/mise
               if [ ! -s /srv/worker-data/codex-home/auth.json ]; then
-                cp /codex-auth/auth.json /srv/worker-data/codex-home/auth.json
+                cp /codex-auth/auth.json /srv/worker-data/codex-home/auth.json.next
+                chown 10001:10001 /srv/worker-data/codex-home/auth.json.next
+                chmod 0600 /srv/worker-data/codex-home/auth.json.next
+                mv /srv/worker-data/codex-home/auth.json.next \
+                  /srv/worker-data/codex-home/auth.json
               fi
               chown -R 10001:10001 /srv/worker-data/codex-home
-              chown -R 10001:10001 /srv/worker-data/mise-data
+              chown -R 10001:10001 /srv/worker-data/local-home
               chmod 0700 /srv/worker-data/codex-home
-              chmod 0755 /srv/worker-data/mise-data
+              chmod 0755 /srv/worker-data/local-home
               chmod 0600 /srv/worker-data/codex-home/auth.json
               chown -R 10001:10001 /srv/symphony/workspaces
               chmod 0777 /srv/symphony/workspaces
@@ -133,9 +138,12 @@ spec:
             - name: workspaces
               mountPath: /home/symphony/.codex
               subPath: codex-home
+            - name: codex-chatgpt-auth
+              mountPath: /etc/symphony/codex-auth
+              readOnly: true
             - name: workspaces
-              mountPath: /home/symphony/.local/share/mise
-              subPath: mise-data
+              mountPath: /home/symphony/.local
+              subPath: local-home
             - name: worker-hostkeys
               mountPath: /etc/ssh/keys
               readOnly: true
