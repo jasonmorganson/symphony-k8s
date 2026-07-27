@@ -23,12 +23,13 @@ done
 grep -A3 '^  dispatch_state_order:' "$runtime" | grep -q -- '- Merging'
 grep -A3 '^  dispatch_priority_labels:' "$runtime" | grep -q -- '- production-gate'
 grep -A3 '^  dispatch_priority_labels:' "$runtime" | grep -q -- '- main-ci'
+grep -A1 '^  max_concurrent_agents_by_state:' "$runtime" | grep -q '^    Merging: 3$'
 grep -q '^  root: /srv/symphony/workspaces$' "$runtime"
 grep -q -- '--model gpt-5.6 app-server' "$runtime"
 grep -q 'model_reasoning_effort=medium' "$runtime"
 grep -q 'agents.max_threads=3' "$runtime"
 grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$runtime"
-grep -q '^ARG SYMPHONY_COMMIT=354dd2dae6cb0ba287bd37d4c035229048259e7c$' \
+grep -q '^ARG SYMPHONY_COMMIT=066cf173060b99cd254b3ebf6fe8f49b9835fb35$' \
   "$release_dockerfile"
 grep -A1 '^hooks:$' "$runtime" | grep -q '^  timeout_ms: 600000$'
 grep -q 'render-workflow.sh' "$generator"
@@ -39,6 +40,16 @@ grep -q 'requester-policy.json' "$generator"
 grep -q 'workflow-source.json' "$generator"
 grep -q 'SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE' "$generator"
 grep -q '^## External-wait checkpoint$' "$throughput_overlay"
+grep -q '^## Parallel merge preparation and final-writer lease$' "$throughput_overlay"
+grep -q '"action":"yield"' "$throughput_overlay"
+grep -q '"action":"acquire"' "$throughput_overlay"
+grep -q '"action":"release"' "$throughput_overlay"
+grep -q 'explicit release is required' "$throughput_overlay"
+grep -q '^## Exact-state validation evidence$' "$throughput_overlay"
+grep -q -- '- `head_sha`:' "$throughput_overlay"
+grep -q -- '- `main_sha`:' "$throughput_overlay"
+grep -q -- '- `config_digest`:' "$throughput_overlay"
+grep -q 'never replaces required GitHub' "$throughput_overlay"
 grep -q '^## Shared-gate repair classification$' "$throughput_overlay"
 grep -q 'During normal Symphony workpad reconciliation' "$throughput_overlay"
 grep -q 'add its missing matching label through the workflow' "$throughput_overlay"
