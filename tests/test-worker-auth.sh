@@ -75,6 +75,74 @@ assert_session_result success success
 assert_session_result unexpected failure
 assert_session_result failure failure
 
+assert_codex_auth_sync() {
+  local tmp source_auth target_auth mode
+  tmp="$(mktemp -d)"
+  source_auth="$tmp/source.json"
+  SYMPHONY_HOME="$tmp/home"
+  export CODEX_AUTH_SOURCE="$source_auth"
+  mkdir -p "$SYMPHONY_HOME/.codex"
+  printf '%s\n' '{"canonical":"new"}' > "$source_auth"
+  printf '%s\n' '{"stale":"old"}' > "$SYMPHONY_HOME/.codex/auth.json"
+  install() {
+    mkdir -p "${*: -1}"
+    chmod 0700 "${*: -1}"
+  }
+  chown() { :; }
+
+  synchronize_codex_auth
+
+  target_auth="$SYMPHONY_HOME/.codex/auth.json"
+  cmp -s "$source_auth" "$target_auth"
+  [[ ! -e "$target_auth.next" ]]
+  mode="$(stat -c '%a' "$target_auth" 2>/dev/null || stat -f '%Lp' "$target_auth")"
+  [[ "$mode" == 600 ]]
+
+  : > "$source_auth"
+  if synchronize_codex_auth 2>"$tmp/error.log"; then
+    echo "empty canonical Codex auth must fail closed" >&2
+    return 1
+  fi
+  grep -q 'canonical Codex ChatGPT authentication is unavailable' "$tmp/error.log"
+  unset -f install chown
+  unset CODEX_AUTH_SOURCE
+  rm -rf "$tmp"
+}
+
+assert_codex_auth_sync
+
+assert_codex_recovery() {
+  local mode="$1" expected_syncs="$2" tmp syncs=0
+  tmp="$(mktemp -d)"
+  verify_codex_chatgpt_auth() {
+    [[ "$mode" != broken || -s "$tmp/restored" ]]
+  }
+  verify_codex_chatgpt_session() {
+    [[ "$mode" != broken || -s "$tmp/restored" ]]
+  }
+  synchronize_codex_auth() {
+    printf '%s\n' restored > "$tmp/restored"
+    printf '%s\n' sync >> "$tmp/syncs"
+  }
+
+  ensure_codex_chatgpt_session 2>"$tmp/error.log"
+
+  if [[ -f "$tmp/syncs" ]]; then
+    syncs="$(wc -l < "$tmp/syncs")"
+  fi
+  [[ "$syncs" == "$expected_syncs" ]]
+  if [[ "$mode" == broken ]]; then
+    grep -q 'restoring canonical authentication' "$tmp/error.log"
+  else
+    [[ ! -s "$tmp/error.log" ]]
+  fi
+  unset -f verify_codex_chatgpt_auth verify_codex_chatgpt_session synchronize_codex_auth
+  rm -rf "$tmp"
+}
+
+assert_codex_recovery healthy 0
+assert_codex_recovery broken 1
+
 assert_machine_identity_result() {
   local login="$1" expected="$2" repository_access="${3:-success}"
   local secret="machine-token-must-not-leak" output rc=0
@@ -214,8 +282,18 @@ grep -q 'GITHUB_MACHINE_EMAIL="jason+symphony@withgraph.com"' "$ROOT_DIR/docker/
 grep -q 'git config --global user.useConfigOnly true' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'verify_sshd_git_identity' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'verify_codex_chatgpt_session' "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'ensure_codex_chatgpt_session' "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'ensure_runtime_permissions' "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'synchronize_codex_auth' "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'chown -R symphony:symphony' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'Codex ChatGPT session could not complete an authenticated request' \
   "$ROOT_DIR/docker/worker/entrypoint.sh"
+grep -q 'if \[ ! -s /srv/worker-data/codex-home/auth.json \]; then' \
+  "${worker_manifests[0]}"
+grep -q 'cp /codex-auth/auth.json /srv/worker-data/codex-home/auth.json.next' \
+  "${worker_manifests[0]}"
+grep -q 'mountPath: /home/symphony/.local' "${worker_manifests[0]}"
+grep -q 'mountPath: /etc/symphony/codex-auth' "${worker_manifests[0]}"
 grep -q 'git ls-remote --exit-code' "$ROOT_DIR/docker/worker/entrypoint.sh"
 sshd_config="$ROOT_DIR/config/sshd_config.d/worker.conf"
 setenv_line='SetEnv GIT_AUTHOR_NAME=autograph-symphony GIT_AUTHOR_EMAIL=jason+symphony@withgraph.com GIT_COMMITTER_NAME=autograph-symphony GIT_COMMITTER_EMAIL=jason+symphony@withgraph.com'
