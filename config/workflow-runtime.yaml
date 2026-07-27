@@ -52,7 +52,7 @@ agent:
     - production-gate
     - main-ci
   max_concurrent_agents_by_state:
-    Merging: 1
+    Merging: 3
 codex:
   command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=medium --config agents.max_threads=3 --model gpt-5.6 app-server
   approval_policy: never

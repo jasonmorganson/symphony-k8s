@@ -11,14 +11,61 @@ external event such as GitHub checks, deployment verification, or human review:
 1. Query the external system once and record the exact identity being awaited in the workpad,
    including the PR and head SHA plus the check run or deployment ID and its current status.
 2. Persist every local change, workpad update, and validation result needed by a continuation.
-3. End the invocation cleanly without sleeping, repeatedly polling, changing the Linear state, or
-   treating the wait as a failure. Symphony will retain the active issue and schedule its
-   continuation without holding the authenticated worker.
+3. Call `symphony_merge_writer` with `{"action":"yield"}` and then end the turn without sleeping,
+   repeatedly polling, changing the Linear state, or treating the wait as a failure. The explicit
+   yield stops back-to-back Codex continuation, releases any writer lease and the authenticated
+   worker, and schedules a later continuation for the still-active issue.
 4. On continuation, re-query the recorded identity once. Resume the matching gate when it is
    terminal; otherwise checkpoint and yield cleanly again.
 
 Do not checkpoint while an actionable diff, merge conflict, reviewer comment, deterministic
 failure, or other repository task remains.
+
+## Parallel merge preparation and final-writer lease
+
+Merging preparation is parallel: synchronize the branch, resolve conflicts, address review,
+validate, and observe external checks without holding the final-writer lease. Once every final
+prerequisite is satisfied, call `symphony_merge_writer` with `{"action":"acquire"}`. If another
+issue owns the lease, use the external-wait checkpoint.
+
+After acquiring the lease, revalidate the exact PR head, current base, approval, and required
+checks before executing the irreversible merge step. Call `symphony_merge_writer` with
+`{"action":"release"}` immediately after landing. Release before continuing or yielding if any
+prerequisite becomes non-terminal or actionable repair is needed. Process exit also releases the
+lease, but explicit release is required.
+
+## Exact-state validation evidence
+
+Treat a successful local validation result as reusable evidence, not as a reason to rerun the same
+commands on every continuation. The single workpad is the durable evidence cache.
+
+Before running a local validation set, compute and record this identity:
+
+- `head_sha`: the full commit SHA being validated (`git rev-parse HEAD`);
+- `main_sha`: the full fetched default-branch SHA used as the comparison/merge base
+  (`git rev-parse origin/main` after `git fetch origin main`);
+- `config_digest`: SHA-256 of a canonical, newline-delimited manifest containing every command in
+  the validation set, its relevant arguments/environment mode, and the contents or blob SHAs of
+  configuration files that select or materially change those checks.
+
+Record successful evidence in the workpad `Validation` section with the exact identity, commands,
+terminal result, and observation time. Before rerunning a validation set, re-read that evidence and
+recompute all three identity fields. Reuse it only when:
+
+1. all three fields match exactly;
+2. every required command has a recorded successful terminal result;
+3. the working tree is clean, so no uncommitted input exists outside `head_sha`; and
+4. no ticket requirement, review request, or documented repository policy explicitly requires a
+   fresh execution.
+
+If reusable, cite the matching evidence in the workpad and continue without rerunning those local
+commands. Any changed head, fetched main, command set, environment mode, or relevant check
+configuration invalidates the evidence. Missing, partial, ambiguous, or failed evidence is never
+reusable.
+
+This optimization applies only to redundant local validation. It never replaces required GitHub
+checks, human review, deployment verification, exact-main verification after merge, or a targeted
+rerun needed to prove a new fix. Query those authoritative external gates for the exact current SHA.
 
 ## Shared-gate repair classification
 

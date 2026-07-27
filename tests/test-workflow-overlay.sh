@@ -37,6 +37,16 @@ overlay_line="$(grep -nF '# Deployment overlay' "$TEMP_DIR/rendered.md" | cut -d
   > "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'During normal Symphony workpad reconciliation' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fq '## Exact-state validation evidence' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq '## Parallel merge preparation and final-writer lease' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq '"action":"yield"' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq '"action":"acquire"' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq '"action":"release"' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'head_sha' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'main_sha' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'config_digest' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'never replaces required GitHub' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'add its missing matching label through the workflow' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'same workflow-owned create/update sequence' \
