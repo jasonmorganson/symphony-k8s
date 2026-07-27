@@ -48,6 +48,9 @@ agent:
     Rework: 60000
   dispatch_state_order:
     - Merging
+  dispatch_priority_labels:
+    - production-gate
+    - main-ci
   max_concurrent_agents_by_state:
     Merging: 1
 codex:

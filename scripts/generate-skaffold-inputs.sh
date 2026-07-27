@@ -37,6 +37,7 @@ write_if_changed() {
 
 workflow_file="${SYMPHONY_WORKFLOW_FILE:-$ROOT_DIR/../arrusted-development/WORKFLOW.md}"
 runtime_file="$ROOT_DIR/config/workflow-runtime.yaml"
+throughput_overlay_file="$ROOT_DIR/config/workflow-throughput-overlay.md"
 if [[ ! -f "$workflow_file" ]]; then
   printf 'Missing canonical workflow: %s\n' "$workflow_file" >&2
   printf 'Set SYMPHONY_WORKFLOW_FILE to the checked-out arrusted-development/WORKFLOW.md.\n' >&2
@@ -44,6 +45,11 @@ if [[ ! -f "$workflow_file" ]]; then
 fi
 if [[ ! -f "$runtime_file" ]]; then
   printf 'Missing Kubernetes workflow runtime configuration: %s\n' "$runtime_file" >&2
+  exit 1
+fi
+if [[ ! -f "$throughput_overlay_file" ]]; then
+  printf 'Missing Kubernetes workflow throughput overlay: %s\n' \
+    "$throughput_overlay_file" >&2
   exit 1
 fi
 workflow_repository="$(git -C "$(dirname "$workflow_file")" rev-parse --show-toplevel)"
@@ -123,13 +129,10 @@ ${GITHUB_TOKEN:+GITHUB_TOKEN=${GITHUB_TOKEN}}
 EOF
 )"
 
-workflow_body="$(awk 'BEGIN { separators = 0 } /^---$/ { separators++; next } separators >= 2 { print }' "$workflow_file")"
-if [[ -z "$workflow_body" ]]; then
-  printf 'Canonical workflow has no prompt body after YAML front matter: %s\n' "$workflow_file" >&2
-  exit 1
-fi
-
-write_if_changed "$workflow_dir/WORKFLOW.md" "$(printf '%s\n%s\n%s\n%s' '---' "$(cat "$runtime_file")" '---' "$workflow_body")"
+write_if_changed "$workflow_dir/WORKFLOW.md" "$(
+  "$ROOT_DIR/scripts/render-workflow.sh" \
+    "$runtime_file" "$workflow_file" "$throughput_overlay_file"
+)"
 cp "$policy_file" "$workflow_dir/requester-policy.json"
 PYTHONPATH="$ROOT_DIR" python3 - "$workflow_dir/requester-policy.json" <<'PY'
 import sys
@@ -143,5 +146,5 @@ except Exception as error:
     raise SystemExit(1) from error
 PY
 write_if_changed "$workflow_dir/workflow-source.json" "$(printf \
-  '{"repository":"%s","revision":"%s","workflow":"WORKFLOW.md","requester_policy":".config/symphony/requester-policy.json"}' \
+  '{"repository":"%s","revision":"%s","workflow":"WORKFLOW.md","requester_policy":".config/symphony/requester-policy.json","deployment_overlay":"config/workflow-throughput-overlay.md"}' \
   "$(git -C "$workflow_repository" config --get remote.origin.url)" "$workflow_revision")"
