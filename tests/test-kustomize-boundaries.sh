@@ -70,10 +70,19 @@ awk '
   is_orchestrator && /^---$/ { exit }
 ' "$TEMP_DIR/cd.yaml" > "$orchestrator_manifest"
 
+worker_manifest="$TEMP_DIR/worker.yaml"
+awk '
+  /^kind: StatefulSet$/ { in_statefulset = 1 }
+  in_statefulset && /^  name: symphony-worker$/ { is_worker = 1 }
+  is_worker { print }
+  is_worker && /^---$/ { exit }
+' "$TEMP_DIR/cd.yaml" > "$worker_manifest"
+
 grep -A5 -F 'startupProbe:' "$orchestrator_manifest" | grep -Fq 'failureThreshold: 180'
 grep -A7 -F 'readinessProbe:' "$orchestrator_manifest" | grep -Fq 'timeoutSeconds: 10'
 grep -A7 -F 'readinessProbe:' "$orchestrator_manifest" | grep -Fq 'failureThreshold: 6'
 grep -A8 -F 'livenessProbe:' "$orchestrator_manifest" | grep -Fq 'timeoutSeconds: 10'
 grep -A8 -F 'livenessProbe:' "$orchestrator_manifest" | grep -Fq 'failureThreshold: 6'
+grep -Fq 'podManagementPolicy: Parallel' "$worker_manifest"
 
 echo "Kustomize boundary tests passed"
