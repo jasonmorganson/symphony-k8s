@@ -65,4 +65,17 @@ grep -Fq 'secretName: symphony-worker-authorized-keys' "$TEMP_DIR/bootstrap.yaml
 grep -Fq 'secretName: symphony-worker-hostkeys' "$TEMP_DIR/bootstrap.yaml"
 grep -Fq 'name: symphony-workflow' "$TEMP_DIR/bootstrap.yaml"
 
+orchestrator_manifest="$TEMP_DIR/orchestrator.yaml"
+awk '
+  /^kind: Deployment$/ { in_deployment = 1 }
+  in_deployment && /^  name: symphony-orchestrator$/ { is_orchestrator = 1 }
+  is_orchestrator { print }
+  is_orchestrator && /^---$/ { exit }
+' "$TEMP_DIR/cd.yaml" > "$orchestrator_manifest"
+
+grep -A7 -F 'readinessProbe:' "$orchestrator_manifest" | grep -Fq 'timeoutSeconds: 10'
+grep -A7 -F 'readinessProbe:' "$orchestrator_manifest" | grep -Fq 'failureThreshold: 6'
+grep -A8 -F 'livenessProbe:' "$orchestrator_manifest" | grep -Fq 'timeoutSeconds: 10'
+grep -A8 -F 'livenessProbe:' "$orchestrator_manifest" | grep -Fq 'failureThreshold: 6'
+
 echo "Kustomize boundary tests passed"
