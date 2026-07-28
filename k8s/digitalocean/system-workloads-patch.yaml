@@ -7,7 +7,7 @@ spec:
   template:
     spec:
       nodeSelector:
-        doks.digitalocean.com/node-pool: symphony-system
+        doks.digitalocean.com/node-pool: symphony-control
       tolerations:
         - key: symphony.morganson.me/workload
           operator: Equal
