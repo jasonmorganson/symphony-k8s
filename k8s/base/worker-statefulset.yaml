@@ -7,6 +7,7 @@ metadata:
     app: symphony-worker
 spec:
   serviceName: symphony-worker
+  podManagementPolicy: Parallel
   replicas: 3
   updateStrategy:
     type: OnDelete
