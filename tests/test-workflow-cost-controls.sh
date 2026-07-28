@@ -7,6 +7,7 @@ generator="$ROOT_DIR/scripts/generate-skaffold-inputs.sh"
 throughput_overlay="$ROOT_DIR/config/workflow-throughput-overlay.md"
 autoscaler="$ROOT_DIR/k8s/digitalocean/autoscaler.yaml"
 worker_statefulset="$ROOT_DIR/k8s/base/worker-statefulset.yaml"
+orchestrator_deployment="$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
 release_dockerfile="$ROOT_DIR/docker/release/Dockerfile"
 
 grep -q '^worker:$' "$runtime"
@@ -61,6 +62,12 @@ if grep -A4 'name: workspace-reclaimer' "$worker_statefulset" | grep -q 'python'
   echo "workspace reclaimer must execute the Rust binary directly" >&2
   exit 1
 fi
+
+grep -A1 'name: SYMPHONY_EXTERNAL_WORKSPACE_RECLAIMER' "$orchestrator_deployment" |
+  grep -q 'value: "true"' || {
+  echo "orchestrator must delegate startup cleanup to the Rust reclaimer" >&2
+  exit 1
+}
 
 grep -q '^ARG SYMPHONY_COMMIT=' "$release_dockerfile"
 

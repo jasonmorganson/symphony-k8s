@@ -116,6 +116,8 @@ spec:
               value: C.UTF-8
             - name: ELIXIR_ERL_OPTIONS
               value: +fnu
+            - name: SYMPHONY_EXTERNAL_WORKSPACE_RECLAIMER
+              value: "true"
           volumeMounts:
             - name: workflow
               mountPath: /etc/symphony-workflow
