@@ -183,6 +183,8 @@ if [[ "${1:-}" == "build" ]]; then
     '      containers:' \
     '        - name: worker' \
     "          image: $worker" \
+    '        - name: workspace-reclaimer' \
+    "          image: $worker" \
     '---' \
     'apiVersion: apps/v1' \
     'kind: Deployment' \

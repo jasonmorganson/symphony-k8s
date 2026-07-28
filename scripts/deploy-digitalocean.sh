@@ -251,8 +251,8 @@ validate_rendered_manifest() {
   fi
   if (( image_override_count == 3 )); then
     for image in "$ORCHESTRATOR_IMAGE" "$WORKER_IMAGE" "$AUTOSCALER_IMAGE"; do
-      if [[ "$(grep -Fc "image: $image" "$manifest")" != "1" ]]; then
-        fail "rendered manifest must contain exactly one workload image: $image"
+      if [[ "$(grep -Fc "image: $image" "$manifest")" -lt 1 ]]; then
+        fail "rendered manifest must contain the workload image: $image"
       fi
     done
   fi
