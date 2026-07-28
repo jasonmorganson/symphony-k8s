@@ -11,6 +11,7 @@ SYSTEM_POOL="${SYMPHONY_SYSTEM_NODE_POOL:-symphony-system}"
 WORKER_POOL="${SYMPHONY_WORKER_NODE_POOL:-symphony-ha}"
 WORKER_MIN_NODES="${SYMPHONY_WORKER_MIN_NODES:-0}"
 WORKER_MAX_NODES="${SYMPHONY_WORKER_MAX_NODES:-10}"
+WORKER_VOLUME_SIZE="${SYMPHONY_WORKER_VOLUME_SIZE:-50Gi}"
 DEPLOY_BOOTSTRAP_RUNTIME="${DEPLOY_BOOTSTRAP_RUNTIME:-false}"
 DOKS_REFRESH_KUBECONFIG="${DOKS_REFRESH_KUBECONFIG:-false}"
 SYMPHONY_WAIT_FOR_IDLE="${SYMPHONY_WAIT_FOR_IDLE:-true}"
@@ -76,6 +77,29 @@ require_nonnegative_integer() {
   if [[ ! "$value" =~ ^[0-9]+$ ]]; then
     fail "$name must be a non-negative integer"
   fi
+}
+
+require_storage_size() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*Gi$ ]]; then
+    fail "$name must be a positive whole-Gi storage size"
+  fi
+}
+
+reconcile_worker_volumes() {
+  local replicas
+  local ordinal
+  replicas="$("$KUBECTL" -n symphony get statefulset symphony-worker \
+    -o jsonpath='{.spec.replicas}')"
+  require_nonnegative_integer "live Symphony worker replicas" "$replicas"
+  for ((ordinal = 0; ordinal < replicas; ordinal++)); do
+    "$KUBECTL" -n symphony patch \
+      "persistentvolumeclaim/workspaces-symphony-worker-$ordinal" \
+      --type=merge \
+      --patch \
+      '{"spec":{"resources":{"requests":{"storage":"'"$WORKER_VOLUME_SIZE"'"}}}}'
+  done
 }
 
 validate_image() {
@@ -263,6 +287,7 @@ require_boolean DOKS_REFRESH_KUBECONFIG "$DOKS_REFRESH_KUBECONFIG"
 require_boolean SYMPHONY_WAIT_FOR_IDLE "$SYMPHONY_WAIT_FOR_IDLE"
 require_nonnegative_integer SYMPHONY_WORKER_MIN_NODES "$WORKER_MIN_NODES"
 require_nonnegative_integer SYMPHONY_WORKER_MAX_NODES "$WORKER_MAX_NODES"
+require_storage_size SYMPHONY_WORKER_VOLUME_SIZE "$WORKER_VOLUME_SIZE"
 require_nonnegative_integer SYMPHONY_IDLE_TIMEOUT_SECONDS "$SYMPHONY_IDLE_TIMEOUT_SECONDS"
 require_nonnegative_integer SYMPHONY_IDLE_POLL_SECONDS "$SYMPHONY_IDLE_POLL_SECONDS"
 
@@ -381,6 +406,7 @@ MUTATION_STARTED=1
   --max-nodes "$WORKER_MAX_NODES"
 
 "$KUBECTL" apply -f "$rendered_manifest"
+reconcile_worker_volumes
 
 if [[ -n "$SOURCE_REVISION" ]]; then
   "$KUBECTL" -n symphony annotate --overwrite \

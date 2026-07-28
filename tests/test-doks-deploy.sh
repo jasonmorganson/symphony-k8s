@@ -257,6 +257,8 @@ grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$WORKER_IMAGE" "$KUSTOMIZE_LO
 grep -F "ghcr.io/jasonmorganson/symphony-k8s-autoscaler=$AUTOSCALER_IMAGE" "$KUSTOMIZE_LOG"
 grep -F "apply --dry-run=client -f " "$KUBECTL_LOG"
 grep -F "apply -f " "$KUBECTL_LOG"
+grep -F -- "-n symphony patch persistentvolumeclaim/workspaces-symphony-worker-0 --type=merge --patch {\"spec\":{\"resources\":{\"requests\":{\"storage\":\"50Gi\"}}}}" "$KUBECTL_LOG"
+grep -F -- "-n symphony patch persistentvolumeclaim/workspaces-symphony-worker-1 --type=merge --patch {\"spec\":{\"resources\":{\"requests\":{\"storage\":\"50Gi\"}}}}" "$KUBECTL_LOG"
 grep -F -- "-n symphony get statefulset symphony-worker -o jsonpath={.spec.replicas}" "$KUBECTL_LOG"
 grep -F "build worker_replicas=2" "$KUSTOMIZE_LOG"
 grep -F "build autoscaler_replicas=0" "$KUSTOMIZE_LOG"
@@ -468,6 +470,13 @@ fi
 reset_logs
 if SYMPHONY_WORKER_MIN_NODES=11 SYMPHONY_WORKER_MAX_NODES=10 run_deploy; then
   echo "invalid node-pool bounds must fail deployment" >&2
+  exit 1
+fi
+[[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" ]]
+
+reset_logs
+if SYMPHONY_WORKER_VOLUME_SIZE=50G run_deploy; then
+  echo "invalid worker volume size must fail deployment" >&2
   exit 1
 fi
 [[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" ]]
