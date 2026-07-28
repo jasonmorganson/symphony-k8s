@@ -84,23 +84,17 @@ pub fn reconcile_plan(
     )
     .max(active_floor);
 
-    let ready_prefix = state
+    let active_limit = desired.min(current) as usize;
+    let drains = state
         .worker_pool
         .configured_hosts
         .iter()
-        .take(current as usize)
-        .take_while(|host| ready_hosts.contains(host_short_name(host)))
-        .count();
-
-    let drain_from = if desired > current {
-        ready_prefix
-    } else if desired < current {
-        desired as usize
-    } else {
-        ready_prefix
-    };
-
-    let drains = state.worker_pool.configured_hosts[drain_from..].to_vec();
+        .enumerate()
+        .filter(|(ordinal, host)| {
+            *ordinal >= active_limit || !ready_hosts.contains(host_short_name(host))
+        })
+        .map(|(_, host)| host.clone())
+        .collect();
     let scale_to = (desired != current).then_some(desired);
 
     Ok(ReconcilePlan {
@@ -225,6 +219,16 @@ mod tests {
         let plan = reconcile_plan(&state(3), 3, &ready, Utc::now(), &config()).unwrap();
         assert_eq!(plan.scale_to, None);
         assert_eq!(plan.drains.first().unwrap(), "symphony-worker-1.workers");
+    }
+
+    #[test]
+    fn unready_worker_does_not_block_later_ready_worker() {
+        let ready = ["symphony-worker-0".into(), "symphony-worker-2".into()]
+            .into_iter()
+            .collect();
+        let plan = reconcile_plan(&state(3), 3, &ready, Utc::now(), &config()).unwrap();
+        assert!(plan.drains.contains(&"symphony-worker-1.workers".into()));
+        assert!(!plan.drains.contains(&"symphony-worker-2.workers".into()));
     }
 
     #[test]

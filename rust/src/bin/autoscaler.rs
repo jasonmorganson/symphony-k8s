@@ -40,6 +40,7 @@ use tracing::{error, info, warn};
 
 const WATCH_SERVER_TIMEOUT_SECONDS: u32 = 60;
 const WATCH_PROGRESS_TIMEOUT: Duration = Duration::from_secs(75);
+const WATCH_RESTART_BACKOFF_MAX_SECONDS: u64 = 15;
 
 #[derive(Clone)]
 struct Settings {
@@ -323,6 +324,7 @@ async fn watch_ready_pods(
     ready_hosts: Arc<RwLock<BTreeSet<String>>>,
     watcher_ready: Arc<AtomicBool>,
 ) {
+    let mut restart_attempt = 0;
     loop {
         let mut stream = watcher::watcher(
             pods.clone(),
@@ -346,6 +348,7 @@ async fn watch_ready_pods(
                 Ok(Ok(Some(Event::InitDone))) => {
                     *ready_hosts.write().await = initial.clone();
                     watcher_ready.store(true, Ordering::Release);
+                    restart_attempt = 0;
                 }
                 Ok(Ok(Some(Event::Apply(pod)))) => {
                     let mut hosts = ready_hosts.write().await;
@@ -369,9 +372,22 @@ async fn watch_ready_pods(
         }
 
         watcher_ready.store(false, Ordering::Release);
-        error!("worker pod watch terminated; restarting");
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        let backoff = watch_restart_backoff(restart_attempt);
+        restart_attempt = restart_attempt.saturating_add(1);
+        warn!(
+            backoff_seconds = backoff.as_secs(),
+            "worker pod watch terminated; restarting"
+        );
+        tokio::time::sleep(backoff).await;
     }
+}
+
+fn watch_restart_backoff(attempt: u32) -> Duration {
+    let seconds = 1_u64
+        .checked_shl(attempt.min(4))
+        .unwrap_or(WATCH_RESTART_BACKOFF_MAX_SECONDS)
+        .min(WATCH_RESTART_BACKOFF_MAX_SECONDS);
+    Duration::from_secs(seconds)
 }
 
 fn update_ready_set(hosts: &mut BTreeSet<String>, pod: &Pod) {
@@ -489,5 +505,14 @@ mod tests {
             ),
             ["symphony-worker-2.workers", "symphony-worker-3.workers"]
         );
+    }
+
+    #[test]
+    fn watch_restarts_use_capped_exponential_backoff() {
+        assert_eq!(watch_restart_backoff(0), Duration::from_secs(1));
+        assert_eq!(watch_restart_backoff(1), Duration::from_secs(2));
+        assert_eq!(watch_restart_backoff(3), Duration::from_secs(8));
+        assert_eq!(watch_restart_backoff(4), Duration::from_secs(15));
+        assert_eq!(watch_restart_backoff(20), Duration::from_secs(15));
     }
 }
