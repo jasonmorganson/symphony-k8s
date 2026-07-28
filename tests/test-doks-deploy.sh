@@ -315,7 +315,7 @@ restore_drain_line="$(grep -nF 'drain:[]' "$EVENT_LOG" |
    post_quiesce_idle_poll_line < apply_event_line &&
    apply_event_line < restore_drain_line ))
 grep -F "annotate --overwrite deployment/symphony-orchestrator deployment/symphony-autoscaler statefulset/symphony-worker symphony.morganson.me/source-revision=$SOURCE_REVISION" "$KUBECTL_LOG"
-grep -F -- "-n symphony rollout status deployment/symphony-orchestrator --timeout=10m" "$KUBECTL_LOG"
+grep -F -- "-n symphony rollout status deployment/symphony-orchestrator --timeout=20m" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-autoscaler --timeout=10m" "$KUBECTL_LOG"
 grep -F -- "-n symphony get statefulset symphony-worker -o jsonpath=" "$KUBECTL_LOG"
 for deployment in coredns konnectivity-agent hubble-relay hubble-ui; do

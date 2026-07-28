@@ -435,7 +435,7 @@ for deployment in "${addons[@]}"; do
 done
 
 refresh_kubeconfig
-"$KUBECTL" -n symphony rollout status deployment/symphony-orchestrator --timeout=10m
+"$KUBECTL" -n symphony rollout status deployment/symphony-orchestrator --timeout=20m
 
 if (( QUIESCE_STARTED == 1 )); then
   restore_symphony_admissions
