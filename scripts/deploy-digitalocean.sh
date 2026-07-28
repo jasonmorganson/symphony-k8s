@@ -14,7 +14,7 @@ WORKER_MAX_NODES="${SYMPHONY_WORKER_MAX_NODES:-10}"
 WORKER_VOLUME_SIZE="${SYMPHONY_WORKER_VOLUME_SIZE:-50Gi}"
 DEPLOY_BOOTSTRAP_RUNTIME="${DEPLOY_BOOTSTRAP_RUNTIME:-false}"
 DOKS_REFRESH_KUBECONFIG="${DOKS_REFRESH_KUBECONFIG:-false}"
-SYMPHONY_WAIT_FOR_IDLE="${SYMPHONY_WAIT_FOR_IDLE:-true}"
+SYMPHONY_WAIT_FOR_IDLE="${SYMPHONY_WAIT_FOR_IDLE:-false}"
 SYMPHONY_IDLE_TIMEOUT_SECONDS="${SYMPHONY_IDLE_TIMEOUT_SECONDS:-14400}"
 SYMPHONY_IDLE_POLL_SECONDS="${SYMPHONY_IDLE_POLL_SECONDS:-30}"
 SYMPHONY_STATE_PATH="${SYMPHONY_STATE_PATH:-/api/v1/namespaces/symphony/services/http:symphony-orchestrator:4000/proxy/api/v1/state}"
@@ -515,14 +515,15 @@ validate_rendered_manifest "$rendered_manifest"
 
 "$KUBECTL" apply --dry-run=client -f "$rendered_manifest" >/dev/null
 
-if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]] &&
-    [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
+if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
   # Validate the state source before mutating admissions. Then quiesce first so
-  # a continuous eligible backlog cannot replace completed sessions forever.
-  # Existing sessions finish naturally while new dispatches remain drained.
+  # a continuous eligible backlog cannot race the rollout. Automatic releases
+  # restart immediately; an operator may opt into a graceful idle wait.
   wait_for_symphony_state false
   quiesce_symphony
-  wait_for_symphony_state true
+  if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]]; then
+    wait_for_symphony_state true
+  fi
   maintenance_autoscaler="$TEMP_DIR/autoscaler.yaml"
   sed '1,/^  replicas: 1$/ s/^  replicas: 1$/  replicas: 0/' \
     "$render_root/digitalocean/autoscaler.yaml" > "$maintenance_autoscaler"

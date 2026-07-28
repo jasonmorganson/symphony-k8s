@@ -413,11 +413,12 @@ docker push ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712
 ```
 
 Merges to `master` automatically build all three images, resolve immutable
-digests, wait up to four hours for Symphony's `.running` list to become empty,
-and deploy through GitHub Actions. Before waiting for idle, deployment snapshots
-the existing worker drains, pauses the autoscaler, and drains every worker from
-new admissions. Active sessions continue normally; retrying issues do not block a
-rollout. The deployment holds the autoscaler at zero until the orchestrator and
+digests, quiesce new admissions, and restart immediately through GitHub Actions.
+The deployment snapshots the existing worker drains, pauses the autoscaler, and
+drains every worker from new admissions. Active sessions may be interrupted and
+are recovered through Symphony retry or rediscovery. Set
+`SYMPHONY_WAIT_FOR_IDLE=true` for an explicitly graceful rollout; that opt-in
+wait is bounded to four hours. The deployment holds the autoscaler at zero until the orchestrator and
 every `OnDelete` worker pod are running the requested immutable digests. It
 verifies source annotations, workload templates, and ready pod image IDs before
 restoring the exact prior drain set, then restores and verifies the autoscaler.

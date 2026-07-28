@@ -355,9 +355,11 @@ assert_quiesced() {
 }
 
 run_deploy() {
+  local wait_for_idle="${SYMPHONY_WAIT_FOR_IDLE:-true}"
   KUBECTL="$TEMP_DIR/kubectl" \
     KUSTOMIZE="$TEMP_DIR/kustomize" \
     DOCTL="$TEMP_DIR/doctl" \
+    SYMPHONY_WAIT_FOR_IDLE="$wait_for_idle" \
     SYMPHONY_IDLE_POLL_SECONDS=0 \
     bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"
 }
@@ -450,6 +452,11 @@ STATE_MODE=busy_then_idle run_deploy
 [[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "3" ]]
 jq -se '.[-1].drained_worker_hosts == ["worker-1"]' "$DRAIN_LOG" >/dev/null
 grep -F "kubernetes cluster node-pool update symphony-k8s symphony-ha --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
+
+reset_logs
+STATE_MODE=busy SYMPHONY_WAIT_FOR_IDLE=false run_deploy
+[[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "2" ]]
+grep -F "apply -f " "$KUBECTL_LOG" >/dev/null
 
 reset_logs
 STATE_MODE=uninitialized_then_idle run_deploy
