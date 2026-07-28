@@ -1,4 +1,13 @@
-FROM python:3.13.5-slim@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419
-COPY autoscaler/scaler.py /app/scaler.py
+FROM rust:1.97.1-alpine3.23@sha256:c4a364ddbf684fe038e6fa6a4f25b30c8dc85247423e0e660676ece0d17be4a2 AS builder
+RUN apk add --no-cache ca-certificates musl-dev
+WORKDIR /src
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY rust ./rust
+RUN cargo build --locked --release --bin symphony-autoscaler
+
+FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /src/target/release/symphony-autoscaler /symphony-autoscaler
 USER 65532:65532
-ENTRYPOINT ["python", "/app/scaler.py"]
+EXPOSE 8080
+ENTRYPOINT ["/symphony-autoscaler"]

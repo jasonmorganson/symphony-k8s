@@ -12,8 +12,6 @@ mkdir -p "$generated/workflow" "$generated/secrets" "$generated/ssh"
 
 printf '%s\n' '---' 'tracker:' '  kind: linear' '---' 'test workflow' \
   > "$generated/workflow/WORKFLOW.md"
-printf '%s\n' '{"schema_version":1}' \
-  > "$generated/workflow/requester-policy.json"
 printf '%s\n' '{"repository":"test","revision":"test"}' \
   > "$generated/workflow/workflow-source.json"
 printf '%s\n' \
@@ -45,7 +43,6 @@ fi
 [[ "$(grep -Ec '^kind:[[:space:]]+Secret[[:space:]]*$' "$TEMP_DIR/bootstrap.yaml")" == "4" ]]
 grep -A4 -E '^kind:[[:space:]]+ConfigMap[[:space:]]*$' "$TEMP_DIR/bootstrap.yaml" |
   grep -Fq 'name: symphony-workflow'
-grep -Fq 'requester-policy.json:' "$TEMP_DIR/bootstrap.yaml"
 grep -Fq 'workflow-source.json:' "$TEMP_DIR/bootstrap.yaml"
 for name in \
   symphony-secrets \

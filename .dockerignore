@@ -3,5 +3,8 @@
 !docker/**
 !config/
 !config/**
-!autoscaler/
-!autoscaler/**
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!rust/
+!rust/**

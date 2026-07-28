@@ -155,8 +155,15 @@ spec:
           image: symphony-worker
           imagePullPolicy: IfNotPresent
           command:
-            - python3
             - /usr/local/bin/workspace-reclaimer
+          ports:
+            - name: reclaimer-http
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: reclaimer-http
+            periodSeconds: 60
           env:
             - name: LINEAR_API_KEY
               valueFrom:

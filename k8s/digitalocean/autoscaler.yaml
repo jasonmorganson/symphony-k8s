@@ -13,10 +13,10 @@ rules:
   - apiGroups: ["apps"]
     resources: ["statefulsets/scale"]
     resourceNames: ["symphony-worker"]
-    verbs: ["get", "update"]
+    verbs: ["get", "patch", "update"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -56,8 +56,6 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-        fsGroup: 65532
-        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: autoscaler
           image: ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:b90c816a1274e78153158d573ed8238cf59356a924936e7ff34d631088ec78de
@@ -67,57 +65,41 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: LINEAR_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: symphony-secrets
-                  key: LINEAR_API_KEY
-            - name: LINEAR_PROJECT_SLUG
-              value: arrusted-development-71c3d9986f6d
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: github-machine-arrusted-symphony
-                  key: token
-            - name: REQUESTER_POLICY_PATH
-              value: /etc/symphony-workflow/requester-policy.json
-            - name: APPROVAL_HANDOFF_RETRY_SECONDS
-              value: "300"
+            - name: STATEFULSET_NAME
+              value: symphony-worker
+            - name: WORKER_POD_SELECTOR
+              value: app=symphony-worker
+            - name: SYMPHONY_STATE_URL
+              value: http://symphony-orchestrator:4000/api/v1/state
+            - name: SYMPHONY_DRAINS_URL
+              value: http://symphony-orchestrator:4000/api/v1/worker-drains
             - name: SYMPHONY_WORKER_DRAIN_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: symphony-secrets
                   key: SYMPHONY_WORKER_DRAIN_TOKEN
             - name: MIN_WORKERS
-              value: "1"
+              value: "0"
             - name: MAX_WORKERS
               value: "10"
             - name: AGENTS_PER_WORKER
               value: "1"
             - name: POLL_INTERVAL_SECONDS
               value: "15"
-            - name: APPROVAL_HANDOFF_POLL_SECONDS
-              value: "60"
-            - name: SCALE_DOWN_COOLDOWN_SECONDS
-              value: "1200"
-            - name: TRACKER_DEMAND_MAX_AGE_SECONDS
+            - name: DEMAND_MAX_AGE_SECONDS
               value: "300"
-            - name: RETRY_CAPACITY_WARMUP_SECONDS
-              value: "300"
-            - name: USAGE_LEDGER_PATH
-              value: /var/lib/symphony-metrics/usage.json
           ports:
             - name: metrics
               containerPort: 8080
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: metrics
             periodSeconds: 15
             failureThreshold: 4
           livenessProbe:
             httpGet:
-              path: /metrics
+              path: /healthz
               port: metrics
             periodSeconds: 30
           resources:
@@ -127,12 +109,6 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
-          volumeMounts:
-            - name: usage-ledger
-              mountPath: /var/lib/symphony-metrics
-            - name: workflow
-              mountPath: /etc/symphony-workflow
-              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -141,17 +117,6 @@ spec:
             runAsGroup: 65532
             capabilities:
               drop: ["ALL"]
-      volumes:
-        - name: usage-ledger
-          persistentVolumeClaim:
-            claimName: symphony-usage-ledger
-        - name: workflow
-          configMap:
-            name: symphony-workflow
-            optional: true
-            items:
-              - key: requester-policy.json
-                path: requester-policy.json
 ---
 apiVersion: v1
 kind: Service
@@ -165,16 +130,3 @@ spec:
     - name: metrics
       port: 8080
       targetPort: metrics
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: symphony-usage-ledger
-  namespace: symphony
-spec:
-  storageClassName: do-block-storage
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
