@@ -171,8 +171,8 @@ jobs:
           AUTOSCALER_IMAGE: ${{ needs.publish.outputs.autoscaler_image }}
           SOURCE_REVISION: ${{ github.sha }}
           DOKS_REFRESH_KUBECONFIG: "true"
-          SYMPHONY_WAIT_FOR_IDLE: "true"
-          SYMPHONY_IDLE_TIMEOUT_SECONDS: "3600"
+          SYMPHONY_WAIT_FOR_IDLE: "false"
+          SYMPHONY_IDLE_TIMEOUT_SECONDS: "14400"
           SYMPHONY_IDLE_POLL_SECONDS: "30"
         run: bash scripts/deploy-digitalocean.sh
       - name: Record deployment

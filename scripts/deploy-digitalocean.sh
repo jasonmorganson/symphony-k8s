@@ -14,8 +14,8 @@ WORKER_MAX_NODES="${SYMPHONY_WORKER_MAX_NODES:-10}"
 WORKER_VOLUME_SIZE="${SYMPHONY_WORKER_VOLUME_SIZE:-50Gi}"
 DEPLOY_BOOTSTRAP_RUNTIME="${DEPLOY_BOOTSTRAP_RUNTIME:-false}"
 DOKS_REFRESH_KUBECONFIG="${DOKS_REFRESH_KUBECONFIG:-false}"
-SYMPHONY_WAIT_FOR_IDLE="${SYMPHONY_WAIT_FOR_IDLE:-true}"
-SYMPHONY_IDLE_TIMEOUT_SECONDS="${SYMPHONY_IDLE_TIMEOUT_SECONDS:-3600}"
+SYMPHONY_WAIT_FOR_IDLE="${SYMPHONY_WAIT_FOR_IDLE:-false}"
+SYMPHONY_IDLE_TIMEOUT_SECONDS="${SYMPHONY_IDLE_TIMEOUT_SECONDS:-14400}"
 SYMPHONY_IDLE_POLL_SECONDS="${SYMPHONY_IDLE_POLL_SECONDS:-30}"
 SYMPHONY_STATE_PATH="${SYMPHONY_STATE_PATH:-/api/v1/namespaces/symphony/services/http:symphony-orchestrator:4000/proxy/api/v1/state}"
 SOURCE_REVISION="${SOURCE_REVISION:-}"
@@ -25,6 +25,7 @@ AUTOSCALER_IMAGE="${AUTOSCALER_IMAGE:-}"
 
 TEMP_DIR=""
 MUTATION_STARTED=0
+APPLY_STARTED=0
 QUIESCE_STARTED=0
 ORIGINAL_AUTOSCALER_REPLICAS=""
 ORIGINAL_DRAINS_JSON=""
@@ -44,7 +45,11 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM
   if (( QUIESCE_STARTED == 1 )); then
-    restore_symphony_admissions || status=1
+    if (( APPLY_STARTED == 0 )); then
+      restore_symphony_admissions false || status=1
+    else
+      echo "deployment failed after apply; leaving Symphony admissions quiesced" >&2
+    fi
   fi
   if (( status != 0 )); then
     emit_diagnostics
@@ -176,6 +181,7 @@ quiesce_symphony() {
 }
 
 restore_symphony_admissions() {
+  local verify_runtime="${1:-false}"
   local failed=0
   local drains_restored=0
 
@@ -190,19 +196,135 @@ restore_symphony_admissions() {
     sleep 2
   done
   if (( drains_restored == 0 )); then
-    failed=1
+    fail "failed to restore Symphony worker admissions"
   fi
+  QUIESCE_STARTED=0
   refresh_kubeconfig || failed=1
   "$KUBECTL" -n symphony scale deployment/symphony-autoscaler \
     --replicas="$ORIGINAL_AUTOSCALER_REPLICAS" || failed=1
   if (( ORIGINAL_AUTOSCALER_REPLICAS > 0 )); then
     "$KUBECTL" -n symphony rollout status deployment/symphony-autoscaler \
       --timeout=10m || failed=1
+    if [[ "$verify_runtime" == "true" ]] &&
+        ! verify_deployment_runtime_image \
+          symphony-autoscaler autoscaler "$AUTOSCALER_IMAGE" \
+          "$ORIGINAL_AUTOSCALER_REPLICAS"; then
+      failed=1
+    fi
   fi
-  QUIESCE_STARTED=0
   if (( failed != 0 )); then
-    fail "failed to restore Symphony admissions after deployment"
+    fail "failed to restore or verify the Symphony autoscaler"
   fi
+}
+
+verify_source_revision() {
+  local resource="$1"
+  local actual
+
+  actual="$("$KUBECTL" -n symphony get "$resource" \
+    -o jsonpath='{.metadata.annotations.symphony\.morganson\.me/source-revision}')"
+  if [[ "$actual" != "$SOURCE_REVISION" ]]; then
+    fail "$resource does not contain the requested source revision"
+  fi
+}
+
+verify_workload_templates() {
+  local actual
+
+  actual="$("$KUBECTL" -n symphony get deployment symphony-orchestrator \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="orchestrator")].image}')"
+  [[ "$actual" == "$ORCHESTRATOR_IMAGE" ]] ||
+    fail "orchestrator Deployment does not contain the requested immutable image"
+
+  actual="$("$KUBECTL" -n symphony get deployment symphony-autoscaler \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="autoscaler")].image}')"
+  [[ "$actual" == "$AUTOSCALER_IMAGE" ]] ||
+    fail "autoscaler Deployment does not contain the requested immutable image"
+
+  actual="$("$KUBECTL" -n symphony get statefulset symphony-worker \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="worker")].image}')"
+  [[ "$actual" == "$WORKER_IMAGE" ]] ||
+    fail "worker StatefulSet does not contain the requested immutable worker image"
+
+  actual="$("$KUBECTL" -n symphony get statefulset symphony-worker \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="workspace-reclaimer")].image}')"
+  [[ "$actual" == "$WORKER_IMAGE" ]] ||
+    fail "worker StatefulSet does not contain the requested immutable reclaimer image"
+
+  if [[ -n "$SOURCE_REVISION" ]]; then
+    verify_source_revision deployment/symphony-orchestrator
+    verify_source_revision deployment/symphony-autoscaler
+    verify_source_revision statefulset/symphony-worker
+  fi
+}
+
+verify_deployment_runtime_image() {
+  local deployment="$1"
+  local container="$2"
+  local expected_image="$3"
+  local replicas="$4"
+  local digest="${expected_image##*@}"
+  local pods
+
+  pods="$("$KUBECTL" -n symphony get pods -l "app=$deployment" -o json)"
+  printf '%s' "$pods" | "$JQ" -e \
+    --arg container "$container" \
+    --arg image "$expected_image" \
+    --arg digest "$digest" \
+    --argjson replicas "$replicas" '
+      [.items[] | select(.metadata.deletionTimestamp == null)] as $pods |
+      ($pods | length) == $replicas and
+      all($pods[];
+        any(.status.conditions[]?;
+          .type == "Ready" and .status == "True") and
+        any(.spec.containers[];
+          .name == $container and .image == $image) and
+        any(.status.containerStatuses[]?;
+          .name == $container and .ready == true and
+          (.imageID | endswith($digest)))
+      )' >/dev/null ||
+    fail "$deployment runtime pods do not all use the requested immutable image"
+}
+
+restart_worker_pods() {
+  local replicas="$1"
+  local ordinal
+
+  for ((ordinal = replicas - 1; ordinal >= 0; ordinal--)); do
+    refresh_kubeconfig
+    "$KUBECTL" -n symphony delete "pod/symphony-worker-$ordinal" \
+      --wait=true --timeout=5m
+    refresh_kubeconfig
+    "$KUBECTL" -n symphony wait --for=condition=Ready \
+      "pod/symphony-worker-$ordinal" --timeout=20m
+  done
+}
+
+verify_worker_runtime_images() {
+  local replicas="$1"
+  local digest="${WORKER_IMAGE##*@}"
+  local pods
+
+  pods="$("$KUBECTL" -n symphony get pods -l app=symphony-worker -o json)"
+  printf '%s' "$pods" | "$JQ" -e \
+    --arg image "$WORKER_IMAGE" \
+    --arg digest "$digest" \
+    --argjson replicas "$replicas" '
+      [.items[] | select(.metadata.deletionTimestamp == null)] as $pods |
+      ($pods | length) == $replicas and
+      all($pods[];
+        . as $pod |
+        any($pod.status.conditions[]?;
+          .type == "Ready" and .status == "True") and
+        all(["worker", "workspace-reclaimer"][];
+          . as $name |
+          any($pod.spec.containers[];
+            .name == $name and .image == $image) and
+          any($pod.status.containerStatuses[]?;
+            .name == $name and .ready == true and
+            (.imageID | endswith($digest))))
+      )' >/dev/null ||
+    fail "worker runtime pods do not all use the requested immutable image"
 }
 
 wait_for_symphony_state() {
@@ -393,14 +515,15 @@ validate_rendered_manifest "$rendered_manifest"
 
 "$KUBECTL" apply --dry-run=client -f "$rendered_manifest" >/dev/null
 
-if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]] &&
-    [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
+if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
   # Validate the state source before mutating admissions. Then quiesce first so
-  # a continuous eligible backlog cannot replace completed sessions forever.
-  # Existing sessions finish naturally while new dispatches remain drained.
+  # a continuous eligible backlog cannot race the rollout. Automatic releases
+  # restart immediately; an operator may opt into a graceful idle wait.
   wait_for_symphony_state false
   quiesce_symphony
-  wait_for_symphony_state true
+  if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]]; then
+    wait_for_symphony_state true
+  fi
   maintenance_autoscaler="$TEMP_DIR/autoscaler.yaml"
   sed '1,/^  replicas: 1$/ s/^  replicas: 1$/  replicas: 0/' \
     "$render_root/digitalocean/autoscaler.yaml" > "$maintenance_autoscaler"
@@ -420,6 +543,7 @@ MUTATION_STARTED=1
   --min-nodes "$WORKER_MIN_NODES" \
   --max-nodes "$WORKER_MAX_NODES"
 
+APPLY_STARTED=1
 "$KUBECTL" apply -f "$rendered_manifest"
 reconcile_worker_volumes
 
@@ -447,18 +571,31 @@ done
 refresh_kubeconfig
 "$KUBECTL" -n symphony rollout status deployment/symphony-orchestrator --timeout=20m
 
+if (( image_override_count == 3 )); then
+  verify_workload_templates
+  verify_deployment_runtime_image \
+    symphony-orchestrator orchestrator "$ORCHESTRATOR_IMAGE" 1
+  if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
+    restart_worker_pods "$live_worker_replicas"
+    verify_worker_runtime_images "$live_worker_replicas"
+  fi
+fi
+
 if (( QUIESCE_STARTED == 1 )); then
-  restore_symphony_admissions
+  restore_symphony_admissions true
 else
   refresh_kubeconfig
   "$KUBECTL" -n symphony rollout status deployment/symphony-autoscaler --timeout=10m
-fi
-
-if (( image_override_count == 3 )); then
-  deployed_worker_image="$("$KUBECTL" -n symphony get statefulset symphony-worker \
-    -o jsonpath='{.spec.template.spec.containers[?(@.name=="worker")].image}')"
-  if [[ "$deployed_worker_image" != "$WORKER_IMAGE" ]]; then
-    fail "worker StatefulSet template does not contain the requested immutable image"
+  if (( image_override_count == 3 )); then
+    autoscaler_replicas="$("$KUBECTL" -n symphony get deployment \
+      symphony-autoscaler -o jsonpath='{.spec.replicas}')"
+    require_nonnegative_integer "live Symphony autoscaler replicas" \
+      "$autoscaler_replicas"
+    if (( autoscaler_replicas > 0 )); then
+      verify_deployment_runtime_image \
+        symphony-autoscaler autoscaler "$AUTOSCALER_IMAGE" \
+        "$autoscaler_replicas"
+    fi
   fi
 fi
 

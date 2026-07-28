@@ -17,11 +17,10 @@ use prometheus_client::{
     metrics::{counter::Counter, gauge::Gauge},
     registry::Registry,
 };
-use reqwest::Client;
 use symphony_control_plane::{
     env::{i64 as env_i64, string as env_string, u32 as env_u32, u64 as env_u64},
-    reclaimer::{ReclaimerConfig, WorkspaceReclaimer, linear_issue_states},
-    symphony::SymphonyStateClient,
+    reclaimer::{ReclaimerConfig, WorkspaceReclaimer},
+    symphony::SymphonyClient,
 };
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::{error, info};
@@ -86,7 +85,8 @@ async fn main() -> Result<()> {
     if interval_seconds < 60 {
         bail!("workspace reclaimer interval must be at least 60 seconds");
     }
-    let api_key = env::var("LINEAR_API_KEY").context("missing LINEAR_API_KEY")?;
+    let control_token =
+        env::var("SYMPHONY_WORKER_DRAIN_TOKEN").context("missing SYMPHONY_WORKER_DRAIN_TOKEN")?;
     let reclaimer = WorkspaceReclaimer::new(ReclaimerConfig {
         root: PathBuf::from(env_string("WORKSPACE_ROOT", "/srv/symphony/workspaces")),
         state_path: PathBuf::from(env_string(
@@ -96,14 +96,17 @@ async fn main() -> Result<()> {
         confirmations: env_u32("WORKSPACE_RECLAIMER_CONFIRMATIONS", 2)?,
         grace_seconds: env_i64("WORKSPACE_RECLAIMER_GRACE_SECONDS", 3600)?,
     })?;
-    let symphony = SymphonyStateClient::new(env_string(
-        "SYMPHONY_STATE_URL",
-        "http://symphony-orchestrator:4000/api/v1/state",
-    ))?;
-    let client = Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .context("build Linear HTTP client")?;
+    let symphony = SymphonyClient::new(
+        env_string(
+            "SYMPHONY_STATE_URL",
+            "http://symphony-orchestrator:4000/api/v1/state",
+        ),
+        env_string(
+            "SYMPHONY_DRAINS_URL",
+            "http://symphony-orchestrator:4000/api/v1/worker-drains",
+        ),
+        control_token,
+    )?;
 
     let mut registry = Registry::default();
     let metrics = Metrics::register(&mut registry);
@@ -121,7 +124,7 @@ async fn main() -> Result<()> {
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         ticker.tick().await;
-        match reclaim_once(&reclaimer, &symphony, &client, &api_key, &metrics).await {
+        match reclaim_once(&reclaimer, &symphony, &metrics).await {
             Ok(removed) => {
                 ready.store(true, Ordering::Release);
                 metrics.reconciliations.inc();
@@ -139,9 +142,7 @@ async fn main() -> Result<()> {
 
 async fn reclaim_once(
     reclaimer: &WorkspaceReclaimer,
-    symphony: &SymphonyStateClient,
-    client: &Client,
-    api_key: &str,
+    symphony: &SymphonyClient,
     metrics: &Metrics,
 ) -> Result<Vec<String>> {
     symphony.state().await?;
@@ -149,9 +150,10 @@ async fn reclaim_once(
     metrics
         .observed
         .set(i64::try_from(directories.len()).unwrap_or(i64::MAX));
-    let linear_states = linear_issue_states(client, api_key, directories.keys().cloned()).await?;
+    let identifiers = directories.keys().cloned().collect::<Vec<_>>();
+    let terminal_states = symphony.terminal_issue_states(&identifiers).await?;
     let final_state = symphony.state().await?;
-    Ok(reclaimer.reclaim_directories(&final_state, &linear_states, directories, Utc::now())?)
+    Ok(reclaimer.reclaim_directories(&final_state, &terminal_states, directories, Utc::now())?)
 }
 
 async fn serve(bind: SocketAddr, state: AppState) {

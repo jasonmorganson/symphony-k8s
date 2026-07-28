@@ -174,11 +174,11 @@ spec:
               port: reclaimer-http
             periodSeconds: 60
           env:
-            - name: LINEAR_API_KEY
+            - name: SYMPHONY_WORKER_DRAIN_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: symphony-secrets
-                  key: LINEAR_API_KEY
+                  key: SYMPHONY_WORKER_DRAIN_TOKEN
             - name: SYMPHONY_STATE_URL
               value: http://symphony-orchestrator:4000/api/v1/state
             - name: WORKSPACE_RECLAIMER_INTERVAL_SECONDS
