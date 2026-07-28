@@ -76,8 +76,17 @@ pub fn reconcile_plan(
     }
 
     let active_floor = active_floor(state, config)?;
+    let active_demand = u32::try_from(state.running.len())
+        .ok()
+        .and_then(|running| {
+            u32::try_from(state.retrying.len())
+                .ok()
+                .and_then(|retrying| running.checked_add(retrying))
+        })
+        .and_then(|active| active.checked_add(state.demand.eligible))
+        .ok_or(PlanError::MalformedState)?;
     let desired = desired_workers(
-        state.demand.eligible,
+        active_demand,
         config.agents_per_worker,
         config.minimum,
         config.maximum,
@@ -202,6 +211,32 @@ mod tests {
         let plan = reconcile_plan(&state(3), 1, &ready, Utc::now(), &config()).unwrap();
         assert_eq!(plan.scale_to, Some(3));
         assert_eq!(plan.drains.first().unwrap(), "symphony-worker-1.workers");
+    }
+
+    #[test]
+    fn pending_work_scales_beyond_running_sessions() {
+        let mut state = state(1);
+        state.running.push(crate::symphony::SessionEntry {
+            issue_identifier: Some("A-1".into()),
+            worker_host: Some("symphony-worker-0.workers".into()),
+        });
+        let ready = ["symphony-worker-0".into()].into_iter().collect();
+        let plan = reconcile_plan(&state, 1, &ready, Utc::now(), &config()).unwrap();
+        assert_eq!(plan.active_floor, 1);
+        assert_eq!(plan.desired, 2);
+        assert_eq!(plan.scale_to, Some(2));
+    }
+
+    #[test]
+    fn retrying_work_retains_capacity() {
+        let mut state = state(0);
+        state.retrying.push(crate::symphony::SessionEntry {
+            issue_identifier: Some("A-1".into()),
+            worker_host: None,
+        });
+        let plan = reconcile_plan(&state, 0, &BTreeSet::new(), Utc::now(), &config()).unwrap();
+        assert_eq!(plan.desired, 1);
+        assert_eq!(plan.scale_to, Some(1));
     }
 
     #[test]

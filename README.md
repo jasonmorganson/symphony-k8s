@@ -200,7 +200,8 @@ The Rust `symphony-autoscaler` polls Symphony's existing state API every 15
 seconds. It makes no Linear or GitHub request and receives neither credential.
 Symphony reports eligible demand from candidate data already fetched by its
 normal poll. Desired replicas are
-`clamp(min, max, ceil(eligible / agents_per_worker))`, with bounds `0..10`.
+`clamp(min, max, ceil((running + retrying + eligible) / agents_per_worker))`,
+with bounds `0..10`.
 
 Scale-up keeps new ordinals drained, increases StatefulSet replicas, and
 watches worker pods with kube-rs. Ready workers are undrained on the next
