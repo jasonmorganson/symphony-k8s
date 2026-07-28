@@ -69,7 +69,7 @@ spec:
               chmod 0700 /srv/worker-data/codex-home
               chmod 0755 /srv/worker-data/local-home
               chmod 0600 /srv/worker-data/codex-home/auth.json
-              chmod 0777 /srv/symphony/workspaces
+              chmod 2777 /srv/symphony/workspaces
           securityContext:
             runAsUser: 0
           volumeMounts:
