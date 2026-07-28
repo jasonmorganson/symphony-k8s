@@ -215,7 +215,12 @@ wait_for_symphony_idle() {
   while true; do
     refresh_kubeconfig
     if ! state="$("$KUBECTL" get --raw "$SYMPHONY_STATE_PATH")"; then
-      fail "unable to read Symphony state; refusing to deploy"
+      if (( SECONDS >= deadline )); then
+        fail "Symphony state remained unavailable through the idle deadline"
+      fi
+      echo "waiting for Symphony state endpoint availability" >&2
+      sleep "$SYMPHONY_IDLE_POLL_SECONDS"
+      continue
     fi
     if ! running_count="$(printf '%s' "$state" | "$JQ" -er \
       'if (.running | type) == "array" then (.running | length) else error("running must be an array") end')"; then
