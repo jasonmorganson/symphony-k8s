@@ -13,12 +13,12 @@ printf 'kubectl:%s\n' "$*" >> "$EVENT_LOG"
 if [[ "$*" == "get --raw "* ]]; then
   case "${STATE_MODE:-idle}" in
     idle)
-      printf '{"running":[],"retrying":[],"tracker":{"observed_at":"2026-07-24T22:00:00Z","runnable_issues":0,"blocked_issues":0},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":%s}}\n' \
+      printf '{"running":[],"retrying":[],"demand":{"eligible":0,"observed_at":"2026-07-24T22:00:00Z"},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":%s}}\n' \
         "${INITIAL_DRAINS_JSON:-[]}"
       ;;
     busy)
       printf '%s\n' \
-        '{"running":[{"issue_identifier":"A-230"}],"retrying":[],"tracker":{"observed_at":"2026-07-24T22:00:00Z","runnable_issues":1,"blocked_issues":0},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
+        '{"running":[{"issue_identifier":"A-230"}],"retrying":[],"demand":{"eligible":1,"observed_at":"2026-07-24T22:00:00Z"},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
       ;;
     busy_then_idle)
       count=0
@@ -29,15 +29,15 @@ if [[ "$*" == "get --raw "* ]]; then
       printf '%s\n' "$count" > "$STATE_COUNT_FILE"
       if (( count == 1 )); then
         printf '%s\n' \
-          '{"running":[{"issue_identifier":"A-230"}],"retrying":[],"tracker":{"observed_at":"2026-07-24T22:00:00Z","runnable_issues":1,"blocked_issues":0},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":["worker-1"]}}'
+          '{"running":[{"issue_identifier":"A-230"}],"retrying":[],"demand":{"eligible":1,"observed_at":"2026-07-24T22:00:00Z"},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":["worker-1"]}}'
       else
         printf '%s\n' \
-          '{"running":[],"retrying":[{"issue_identifier":"A-211"}],"tracker":{"observed_at":"2026-07-24T22:00:00Z","runnable_issues":1,"blocked_issues":0},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":["worker-1"]}}'
+          '{"running":[],"retrying":[{"issue_identifier":"A-211"}],"demand":{"eligible":1,"observed_at":"2026-07-24T22:00:00Z"},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":["worker-1"]}}'
       fi
       ;;
     uninitialized)
       printf '%s\n' \
-        '{"running":[],"retrying":[],"tracker":null,"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
+        '{"running":[],"retrying":[],"demand":{"eligible":0,"observed_at":null},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
       ;;
     uninitialized_then_idle)
       count=0
@@ -48,9 +48,9 @@ if [[ "$*" == "get --raw "* ]]; then
       printf '%s\n' "$count" > "$STATE_COUNT_FILE"
       if (( count == 1 )); then
         printf '%s\n' \
-          '{"running":[],"retrying":[],"tracker":null,"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
+          '{"running":[],"retrying":[],"demand":{"eligible":0,"observed_at":null},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":[]}}'
       else
-        printf '{"running":[],"retrying":[],"tracker":{"observed_at":"2026-07-24T22:00:00Z","runnable_issues":0,"blocked_issues":0},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":%s}}\n' \
+        printf '{"running":[],"retrying":[],"demand":{"eligible":0,"observed_at":"2026-07-24T22:00:00Z"},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":%s}}\n' \
           "${INITIAL_DRAINS_JSON:-[]}"
       fi
       ;;
@@ -70,7 +70,7 @@ if [[ "$*" == "get --raw "* ]]; then
       if (( count == 1 )); then
         exit 1
       fi
-      printf '{"running":[],"retrying":[],"tracker":{"observed_at":"2026-07-24T22:00:00Z","runnable_issues":0,"blocked_issues":0},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":%s}}\n' \
+      printf '{"running":[],"retrying":[],"demand":{"eligible":0,"observed_at":"2026-07-24T22:00:00Z"},"worker_pool":{"configured_hosts":["worker-0","worker-1"],"drained_hosts":%s}}\n' \
         "${INITIAL_DRAINS_JSON:-[]}"
       ;;
   esac
@@ -394,13 +394,13 @@ fi
 
 reset_logs
 if STATE_MODE=uninitialized SYMPHONY_IDLE_TIMEOUT_SECONDS=0 run_deploy; then
-  echo "persistently uninitialized Symphony tracker must fail at the idle deadline" >&2
+  echo "persistently uninitialized Symphony demand must fail at the idle deadline" >&2
   exit 1
 fi
 [[ ! -s "$DOCTL_LOG" ]]
 if grep -F "scale deployment/symphony-autoscaler" "$KUBECTL_LOG" ||
     grep -F "apply -f " "$KUBECTL_LOG"; then
-  echo "uninitialized Symphony tracker must not mutate provider or cluster state" >&2
+  echo "uninitialized Symphony demand must not mutate provider or cluster state" >&2
   exit 1
 fi
 

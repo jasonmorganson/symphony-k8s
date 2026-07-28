@@ -210,7 +210,7 @@ wait_for_symphony_idle() {
   local state
   local running_count
   local running_issues
-  local tracker_status
+  local demand_status
 
   while true; do
     refresh_kubeconfig
@@ -226,29 +226,32 @@ wait_for_symphony_idle() {
       'if (.running | type) == "array" then (.running | length) else error("running must be an array") end')"; then
       fail "invalid Symphony state; refusing to deploy"
     fi
-    if ! tracker_status="$(printf '%s' "$state" | "$JQ" -er \
-      'if has("tracker") and .tracker == null then
+    if ! demand_status="$(printf '%s' "$state" | "$JQ" -er \
+      'if
+         (.demand | type) == "object" and
+         (.demand.eligible | type) == "number" and
+         .demand.eligible >= 0 and
+         .demand.observed_at == null
+       then
          "uninitialized"
        elif
-         (.tracker | type) == "object" and
-         (.tracker.observed_at | type) == "string" and
-         (.tracker.observed_at | length) > 0 and
-         (.tracker.runnable_issues | type) == "number" and
-         .tracker.runnable_issues >= 0 and
-         (.tracker.blocked_issues | type) == "number" and
-         .tracker.blocked_issues >= 0
+         (.demand | type) == "object" and
+         (.demand.eligible | type) == "number" and
+         .demand.eligible >= 0 and
+         (.demand.observed_at | type) == "string" and
+         (.demand.observed_at | length) > 0
        then
          "initialized"
        else
-         error("invalid tracker snapshot")
+         error("invalid demand snapshot")
        end')"; then
-      fail "invalid Symphony tracker snapshot; refusing to deploy"
+      fail "invalid Symphony demand snapshot; refusing to deploy"
     fi
-    if [[ "$tracker_status" == "uninitialized" ]]; then
+    if [[ "$demand_status" == "uninitialized" ]]; then
       if (( SECONDS >= deadline )); then
-        fail "Symphony tracker remained uninitialized through the idle deadline"
+        fail "Symphony demand remained uninitialized through the idle deadline"
       fi
-      echo "waiting for Symphony tracker initialization" >&2
+      echo "waiting for Symphony demand initialization" >&2
       sleep "$SYMPHONY_IDLE_POLL_SECONDS"
       continue
     fi
