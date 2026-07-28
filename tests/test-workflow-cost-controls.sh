@@ -62,6 +62,12 @@ if grep -A4 'name: workspace-reclaimer' "$worker_statefulset" | grep -q 'python'
   echo "workspace reclaimer must execute the Rust binary directly" >&2
   exit 1
 fi
+reclaimer_block="$(sed -n '/- name: workspace-reclaimer/,/resources:/p' "$worker_statefulset")"
+printf '%s\n' "$reclaimer_block" | grep -q 'name: SYMPHONY_WORKER_DRAIN_TOKEN'
+if printf '%s\n' "$reclaimer_block" | grep -q 'LINEAR_API_KEY'; then
+  echo "workspace reclaimer must read terminal state through Symphony" >&2
+  exit 1
+fi
 
 grep -A1 'name: SYMPHONY_EXTERNAL_WORKSPACE_RECLAIMER' "$orchestrator_deployment" |
   grep -q 'value: "true"' || {

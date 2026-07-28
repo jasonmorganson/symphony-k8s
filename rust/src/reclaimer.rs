@@ -7,16 +7,9 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use regex::Regex;
-use reqwest::Client;
-use serde::Deserialize;
-use serde_json::json;
 use thiserror::Error;
 
 use crate::symphony::SymphonyState;
-
-const TERMINAL_STATE_TYPES: [&str; 2] = ["completed", "canceled"];
-const LINEAR_QUERY_BATCH_SIZE: usize = 50;
-const LINEAR_GRAPHQL_ENDPOINT: &str = "https://api.linear.app/graphql";
 
 #[derive(Clone, Debug)]
 pub struct ReclaimerConfig {
@@ -26,9 +19,8 @@ pub struct ReclaimerConfig {
     pub grace_seconds: i64,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-pub struct LinearIssueState {
-    pub state_type: String,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalIssueState {
     pub terminal_at: DateTime<Utc>,
 }
 
@@ -48,10 +40,6 @@ pub enum ReclaimerError {
     Io(#[from] std::io::Error),
     #[error("reclaimer state is invalid: {0}")]
     State(#[from] serde_json::Error),
-    #[error("Linear request failed: {0}")]
-    LinearRequest(#[from] reqwest::Error),
-    #[error("Linear workspace reclaimer query failed")]
-    LinearResponse,
     #[error("Symphony state contains an active session without an issue identifier")]
     InvalidSymphonyState,
 }
@@ -63,29 +51,6 @@ pub struct WorkspaceReclaimer {
     confirmations: u32,
     grace_seconds: i64,
     issue_directory: Regex,
-}
-
-#[derive(Debug, Deserialize)]
-struct LinearGraphQlResponse {
-    data: Option<BTreeMap<String, Option<LinearIssue>>>,
-    #[serde(default)]
-    errors: Vec<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LinearIssue {
-    identifier: String,
-    #[serde(rename = "completedAt")]
-    completed_at: Option<DateTime<Utc>>,
-    #[serde(rename = "canceledAt")]
-    canceled_at: Option<DateTime<Utc>>,
-    state: LinearState,
-}
-
-#[derive(Debug, Deserialize)]
-struct LinearState {
-    #[serde(rename = "type")]
-    state_type: String,
 }
 
 impl WorkspaceReclaimer {
@@ -157,17 +122,17 @@ impl WorkspaceReclaimer {
     pub fn reclaim(
         &self,
         symphony_state: &SymphonyState,
-        linear_states: &BTreeMap<String, LinearIssueState>,
+        terminal_states: &BTreeMap<String, TerminalIssueState>,
         now: DateTime<Utc>,
     ) -> Result<Vec<String>, ReclaimerError> {
         let directories = self.issue_directories()?;
-        self.reclaim_directories(symphony_state, linear_states, directories, now)
+        self.reclaim_directories(symphony_state, terminal_states, directories, now)
     }
 
     pub fn reclaim_directories(
         &self,
         symphony_state: &SymphonyState,
-        linear_states: &BTreeMap<String, LinearIssueState>,
+        terminal_states: &BTreeMap<String, TerminalIssueState>,
         directories: BTreeMap<String, PathBuf>,
         now: DateTime<Utc>,
     ) -> Result<Vec<String>, ReclaimerError> {
@@ -177,11 +142,10 @@ impl WorkspaceReclaimer {
         let mut removed = Vec::new();
 
         for (identifier, path) in directories {
-            let Some(issue) = linear_states.get(&identifier) else {
+            let Some(issue) = terminal_states.get(&identifier) else {
                 continue;
             };
             if active.contains(&identifier)
-                || !TERMINAL_STATE_TYPES.contains(&issue.state_type.as_str())
                 || now.signed_duration_since(issue.terminal_at).num_seconds() < self.grace_seconds
             {
                 continue;
@@ -311,88 +275,12 @@ pub fn active_issue_identifiers(state: &SymphonyState) -> Result<BTreeSet<String
         .collect()
 }
 
-pub async fn linear_issue_states(
-    client: &Client,
-    api_key: &str,
-    identifiers: impl IntoIterator<Item = String>,
-) -> Result<BTreeMap<String, LinearIssueState>, ReclaimerError> {
-    linear_issue_states_at(client, api_key, LINEAR_GRAPHQL_ENDPOINT, identifiers).await
-}
-
-async fn linear_issue_states_at(
-    client: &Client,
-    api_key: &str,
-    endpoint: &str,
-    identifiers: impl IntoIterator<Item = String>,
-) -> Result<BTreeMap<String, LinearIssueState>, ReclaimerError> {
-    let identifiers = identifiers.into_iter().collect::<BTreeSet<_>>();
-    if identifiers.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let mut states = BTreeMap::new();
-    let identifiers = identifiers.into_iter().collect::<Vec<_>>();
-    for batch in identifiers.chunks(LINEAR_QUERY_BATCH_SIZE) {
-        let query = linear_query(batch);
-
-        let response = client
-            .post(endpoint)
-            .header("Authorization", api_key)
-            .header("User-Agent", "symphony-workspace-reclaimer")
-            .json(&json!({ "query": query }))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<LinearGraphQlResponse>()
-            .await?;
-
-        if !response.errors.is_empty() {
-            return Err(ReclaimerError::LinearResponse);
-        }
-        let data = response.data.ok_or(ReclaimerError::LinearResponse)?;
-        for issue in data.into_values().flatten() {
-            let terminal_at = issue.completed_at.or(issue.canceled_at);
-            if let Some(terminal_at) = terminal_at {
-                states.insert(
-                    issue.identifier,
-                    LinearIssueState {
-                        state_type: issue.state.state_type,
-                        terminal_at,
-                    },
-                );
-            }
-        }
-    }
-    Ok(states)
-}
-
-fn linear_query(identifiers: &[String]) -> String {
-    let selections = identifiers
-        .iter()
-        .enumerate()
-        .map(|(index, identifier)| {
-            format!(
-                "i{index}: issue(id: \"{identifier}\") \
-                 {{ identifier completedAt canceledAt state {{ type }} }}"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!("query WorkspaceReclaimer {{ {selections} }}")
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{
-        os::unix::fs::symlink,
-        sync::{Arc, Mutex},
-    };
+    use std::os::unix::fs::symlink;
 
-    use axum::{Json, Router, extract::State, routing::post};
     use chrono::TimeDelta;
-    use serde_json::Value;
     use tempfile::TempDir;
-    use tokio::net::TcpListener;
 
     use super::*;
     use crate::symphony::{Demand, SessionEntry, WorkerPool};
@@ -436,9 +324,8 @@ mod tests {
         path
     }
 
-    fn terminal(now: DateTime<Utc>) -> LinearIssueState {
-        LinearIssueState {
-            state_type: "completed".into(),
+    fn terminal(now: DateTime<Utc>) -> TerminalIssueState {
+        TerminalIssueState {
             terminal_at: now - TimeDelta::hours(2),
         }
     }
@@ -500,22 +387,12 @@ mod tests {
         for identifier in ["A-10", "A-11", "A-12"] {
             workspace(&reclaimer, identifier);
         }
-        let issues = BTreeMap::from([
-            (
-                "A-10".into(),
-                LinearIssueState {
-                    state_type: "started".into(),
-                    terminal_at: now - TimeDelta::hours(2),
-                },
-            ),
-            (
-                "A-11".into(),
-                LinearIssueState {
-                    state_type: "completed".into(),
-                    terminal_at: now - TimeDelta::minutes(30),
-                },
-            ),
-        ]);
+        let issues = BTreeMap::from([(
+            "A-11".into(),
+            TerminalIssueState {
+                terminal_at: now - TimeDelta::minutes(30),
+            },
+        )]);
 
         assert!(
             reclaimer
@@ -596,81 +473,6 @@ mod tests {
         assert!(matches!(
             active_issue_identifiers(&uncertain),
             Err(ReclaimerError::InvalidSymphonyState)
-        ));
-    }
-
-    #[test]
-    fn linear_query_aliases_every_identifier() {
-        let query = linear_query(
-            &(1..=LINEAR_QUERY_BATCH_SIZE)
-                .map(|index| format!("A-{index}"))
-                .collect::<Vec<_>>(),
-        );
-        assert!(query.contains("i0: issue(id: \"A-1\")"));
-        assert!(query.contains("i49: issue(id: \"A-50\")"));
-        assert_eq!(query.matches(": issue(").count(), LINEAR_QUERY_BATCH_SIZE);
-    }
-
-    #[tokio::test]
-    async fn linear_queries_are_split_at_the_batch_boundary() {
-        #[derive(Clone)]
-        struct Calls(Arc<Mutex<Vec<usize>>>);
-
-        async fn graphql(State(calls): State<Calls>, Json(payload): Json<Value>) -> Json<Value> {
-            let query = payload["query"].as_str().unwrap();
-            calls
-                .0
-                .lock()
-                .unwrap()
-                .push(query.matches(": issue(").count());
-            Json(json!({ "data": {} }))
-        }
-
-        let calls = Calls(Arc::new(Mutex::new(Vec::new())));
-        let app = Router::new()
-            .route("/", post(graphql))
-            .with_state(calls.clone());
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-
-        let identifiers = (1..=51).map(|index| format!("A-{index}"));
-        let states = linear_issue_states_at(
-            &Client::new(),
-            "token",
-            &format!("http://{address}"),
-            identifiers,
-        )
-        .await
-        .unwrap();
-
-        assert!(states.is_empty());
-        assert_eq!(*calls.0.lock().unwrap(), [50, 1]);
-    }
-
-    #[tokio::test]
-    async fn linear_graphql_errors_fail_closed() {
-        async fn graphql() -> Json<Value> {
-            Json(json!({
-                "data": null,
-                "errors": [{ "message": "rate limited" }]
-            }))
-        }
-
-        let app = Router::new().route("/", post(graphql));
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-
-        assert!(matches!(
-            linear_issue_states_at(
-                &Client::new(),
-                "token",
-                &format!("http://{address}"),
-                ["A-1".into()]
-            )
-            .await,
-            Err(ReclaimerError::LinearResponse)
         ));
     }
 }

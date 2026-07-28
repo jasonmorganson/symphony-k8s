@@ -1,9 +1,11 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::reclaimer::TerminalIssueState;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct SymphonyState {
@@ -46,6 +48,23 @@ struct DrainRequest<'a> {
     drained_worker_hosts: &'a [String],
 }
 
+#[derive(Serialize)]
+struct ReclamationRequest<'a> {
+    issue_identifiers: &'a [String],
+}
+
+#[derive(Deserialize)]
+struct ReclamationResponse {
+    issues: Vec<ReclamationIssue>,
+}
+
+#[derive(Deserialize)]
+struct ReclamationIssue {
+    issue_identifier: String,
+    terminal: bool,
+    terminal_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Error)]
 pub enum SymphonyError {
     #[error("Symphony request failed: {0}")]
@@ -54,6 +73,8 @@ pub enum SymphonyError {
     Http(StatusCode),
     #[error("Symphony drain acknowledgement did not match the requested hosts")]
     DrainMismatch,
+    #[error("Symphony returned invalid workspace reclamation state")]
+    InvalidReclamation,
 }
 
 #[derive(Clone)]
@@ -83,6 +104,7 @@ impl SymphonyStateClient {
 pub struct SymphonyClient {
     state: SymphonyStateClient,
     drains_url: String,
+    reclamation_url: String,
     drain_token: String,
 }
 
@@ -92,9 +114,14 @@ impl SymphonyClient {
         drains_url: String,
         drain_token: String,
     ) -> Result<Self, SymphonyError> {
+        let reclamation_url = state_url
+            .strip_suffix("/state")
+            .map(|base| format!("{base}/workspace-reclamation"))
+            .ok_or(SymphonyError::InvalidReclamation)?;
         Ok(Self {
             state: SymphonyStateClient::new(state_url)?,
             drains_url,
+            reclamation_url,
             drain_token,
         })
     }
@@ -127,6 +154,35 @@ impl SymphonyClient {
         }
         Ok(acknowledgement)
     }
+
+    pub async fn terminal_issue_states(
+        &self,
+        identifiers: &[String],
+    ) -> Result<BTreeMap<String, TerminalIssueState>, SymphonyError> {
+        let mut states = BTreeMap::new();
+        for batch in identifiers.chunks(50) {
+            let response = self
+                .state
+                .http
+                .post(&self.reclamation_url)
+                .bearer_auth(&self.drain_token)
+                .json(&ReclamationRequest {
+                    issue_identifiers: batch,
+                })
+                .send()
+                .await?;
+            if !response.status().is_success() {
+                return Err(SymphonyError::Http(response.status()));
+            }
+            for issue in response.json::<ReclamationResponse>().await?.issues {
+                if issue.terminal {
+                    let terminal_at = issue.terminal_at.ok_or(SymphonyError::InvalidReclamation)?;
+                    states.insert(issue.issue_identifier, TerminalIssueState { terminal_at });
+                }
+            }
+        }
+        Ok(states)
+    }
 }
 
 #[cfg(test)]
@@ -135,7 +191,7 @@ mod tests {
         Json, Router,
         extract::State,
         http::{HeaderMap, StatusCode},
-        routing::{get, put},
+        routing::{get, post, put},
     };
     use serde_json::{Value, json};
     use tokio::net::TcpListener;
@@ -153,6 +209,7 @@ mod tests {
         let app = Router::new()
             .route("/api/v1/state", get(fake_state))
             .route("/api/v1/worker-drains", put(fake_drains))
+            .route("/api/v1/workspace-reclamation", post(fake_reclamation))
             .with_state(FakeState {
                 token: token.clone(),
             });
@@ -178,6 +235,12 @@ mod tests {
             acknowledgement.drained_hosts,
             ["symphony-worker-2".to_string()]
         );
+
+        let terminal = client
+            .terminal_issue_states(&["A-218".into(), "A-222".into()])
+            .await
+            .unwrap();
+        assert_eq!(terminal.keys().cloned().collect::<Vec<_>>(), ["A-218"]);
     }
 
     async fn fake_state() -> Json<Value> {
@@ -218,6 +281,33 @@ mod tests {
             "configured_hosts": ["symphony-worker-0", "symphony-worker-1", "symphony-worker-2"],
             "drained_hosts": drains,
             "active_drained_hosts": []
+        })))
+    }
+
+    async fn fake_reclamation(
+        State(state): State<FakeState>,
+        headers: HeaderMap,
+        Json(body): Json<Value>,
+    ) -> Result<Json<Value>, StatusCode> {
+        if headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            != Some(&format!("Bearer {}", state.token))
+        {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        let identifiers = body["issue_identifiers"]
+            .as_array()
+            .ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
+        Ok(Json(json!({
+            "issues": identifiers.iter().map(|identifier| {
+                let terminal = identifier == "A-218";
+                json!({
+                    "issue_identifier": identifier,
+                    "terminal": terminal,
+                    "terminal_at": terminal.then_some("2026-07-24T22:00:00Z")
+                })
+            }).collect::<Vec<_>>()
         })))
     }
 }
