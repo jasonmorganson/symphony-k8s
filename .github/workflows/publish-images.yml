@@ -49,9 +49,15 @@ jobs:
           cargo +1.97.1 fmt --all -- --check
           cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
           cargo +1.97.1 test --workspace --all-targets --locked
-      - name: Validate Rust images
+      - name: Validate deployment images
         run: |
           docker build -t symphony-runtime-base:test -f docker/runtime-base/Dockerfile .
+          docker build -t symphony-release:test -f docker/release/Dockerfile .
+          docker build \
+            --build-arg RUNTIME_BASE=symphony-runtime-base:test \
+            --build-arg SYMPHONY_RELEASE_IMAGE=symphony-release:test \
+            -t symphony-orchestrator:test \
+            -f docker/orchestrator/Dockerfile .
           docker build \
             --build-arg RUNTIME_BASE=symphony-runtime-base:test \
             -t symphony-worker:test \
