@@ -70,6 +70,7 @@ awk '
   is_orchestrator && /^---$/ { exit }
 ' "$TEMP_DIR/cd.yaml" > "$orchestrator_manifest"
 
+grep -A5 -F 'startupProbe:' "$orchestrator_manifest" | grep -Fq 'failureThreshold: 180'
 grep -A7 -F 'readinessProbe:' "$orchestrator_manifest" | grep -Fq 'timeoutSeconds: 10'
 grep -A7 -F 'readinessProbe:' "$orchestrator_manifest" | grep -Fq 'failureThreshold: 6'
 grep -A8 -F 'livenessProbe:' "$orchestrator_manifest" | grep -Fq 'timeoutSeconds: 10'
