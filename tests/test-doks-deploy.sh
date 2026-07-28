@@ -335,7 +335,7 @@ grep -F "kubernetes cluster kubeconfig save --expiry-seconds 600 symphony-k8s" "
 
 reset_logs
 STATE_MODE=busy_then_idle run_deploy
-[[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "4" ]]
+[[ "$(grep -Fc "get --raw " "$KUBECTL_LOG")" == "3" ]]
 jq -se '.[-1].drained_worker_hosts == ["worker-1"]' "$DRAIN_LOG" >/dev/null
 grep -F "kubernetes cluster node-pool update symphony-k8s symphony-ha --auto-scale --min-nodes 0 --max-nodes 10" "$DOCTL_LOG"
 
@@ -355,11 +355,11 @@ if STATE_MODE=busy SYMPHONY_IDLE_TIMEOUT_SECONDS=0 run_deploy; then
   exit 1
 fi
 [[ ! -s "$DOCTL_LOG" ]]
-[[ ! -s "$DRAIN_LOG" ]]
-if grep -F "scale deployment/symphony-autoscaler" "$KUBECTL_LOG"; then
-  echo "busy Symphony must not change autoscaler state" >&2
-  exit 1
-fi
+assert_restored
+jq -se '
+  .[0].drained_worker_hosts == ["worker-0", "worker-1"] and
+  .[-1].drained_worker_hosts == []
+' "$DRAIN_LOG" >/dev/null
 if grep -F "apply -f " "$KUBECTL_LOG"; then
   echo "busy Symphony must fail before applying resources" >&2
   exit 1

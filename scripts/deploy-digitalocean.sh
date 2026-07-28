@@ -205,12 +205,15 @@ restore_symphony_admissions() {
   fi
 }
 
-wait_for_symphony_idle() {
+wait_for_symphony_state() {
+  local require_idle="${1:-true}"
   local deadline=$((SECONDS + SYMPHONY_IDLE_TIMEOUT_SECONDS))
   local state
   local running_count
   local running_issues
   local demand_status
+
+  require_boolean "Symphony idle requirement" "$require_idle"
 
   while true; do
     refresh_kubeconfig
@@ -254,6 +257,10 @@ wait_for_symphony_idle() {
       echo "waiting for Symphony demand initialization" >&2
       sleep "$SYMPHONY_IDLE_POLL_SECONDS"
       continue
+    fi
+    if [[ "$require_idle" == "false" ]]; then
+      echo "Symphony state is available; deployment may quiesce admissions"
+      return
     fi
     if (( running_count == 0 )); then
       echo "Symphony is idle; deployment may proceed"
@@ -388,12 +395,12 @@ validate_rendered_manifest "$rendered_manifest"
 
 if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]] &&
     [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
-  # Do not strand active work behind a deployment gate. Wait for the runtime to
-  # become idle before changing admissions, then quiesce and check once more to
-  # close the race with an issue admitted after the first idle observation.
-  wait_for_symphony_idle
+  # Validate the state source before mutating admissions. Then quiesce first so
+  # a continuous eligible backlog cannot replace completed sessions forever.
+  # Existing sessions finish naturally while new dispatches remain drained.
+  wait_for_symphony_state false
   quiesce_symphony
-  wait_for_symphony_idle
+  wait_for_symphony_state true
   maintenance_autoscaler="$TEMP_DIR/autoscaler.yaml"
   sed '1,/^  replicas: 1$/ s/^  replicas: 1$/  replicas: 0/' \
     "$render_root/digitalocean/autoscaler.yaml" > "$maintenance_autoscaler"
