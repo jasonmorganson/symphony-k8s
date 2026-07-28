@@ -69,7 +69,6 @@ spec:
               chmod 0700 /srv/worker-data/codex-home
               chmod 0755 /srv/worker-data/local-home
               chmod 0600 /srv/worker-data/codex-home/auth.json
-              chown -R 10001:10001 /srv/symphony/workspaces
               chmod 0777 /srv/symphony/workspaces
           securityContext:
             runAsUser: 0
