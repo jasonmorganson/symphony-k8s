@@ -85,6 +85,7 @@ grep -A8 -F 'livenessProbe:' "$orchestrator_manifest" | grep -Fq 'timeoutSeconds
 grep -A8 -F 'livenessProbe:' "$orchestrator_manifest" | grep -Fq 'failureThreshold: 6'
 grep -Fq 'podManagementPolicy: Parallel' "$worker_manifest"
 grep -Fq 'chmod 2777 /srv/symphony/workspaces' "$worker_manifest"
+grep -A9 -F 'startupProbe:' "$worker_manifest" | grep -Fq 'failureThreshold: 60'
 if grep -Fq 'chown -R 10001:10001 /srv/symphony/workspaces' "$worker_manifest"; then
   echo "worker startup must not recursively chown the workspace tree" >&2
   exit 1
