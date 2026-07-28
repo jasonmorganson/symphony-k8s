@@ -23,7 +23,11 @@ done
 grep -A3 '^  dispatch_state_order:' "$runtime" | grep -q -- '- Merging'
 grep -A3 '^  dispatch_priority_labels:' "$runtime" | grep -q -- '- production-gate'
 grep -A3 '^  dispatch_priority_labels:' "$runtime" | grep -q -- '- main-ci'
-grep -A1 '^  max_concurrent_agents_by_state:' "$runtime" | grep -q '^    Merging: 3$'
+if grep -q '^  max_concurrent_agents_by_state:' "$runtime"; then
+  echo "Merging must inherit the global agent limit without a per-state ceiling" >&2
+  exit 1
+fi
+[[ "$(grep -c '^    - symphony-worker-[0-9]' "$runtime")" -eq 10 ]]
 grep -q '^  root: /srv/symphony/workspaces$' "$runtime"
 grep -q -- '--model gpt-5.6 app-server' "$runtime"
 grep -q 'model_reasoning_effort=medium' "$runtime"
