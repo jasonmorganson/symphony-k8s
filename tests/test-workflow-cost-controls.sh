@@ -99,5 +99,11 @@ if grep -A3 'name: workflow$' "$orchestrator_deployment" | grep -q 'subPath:'; t
   echo "orchestrator workflow mount must support ConfigMap hot reload" >&2
   exit 1
 fi
+grep -A28 'name: workspace-reclaimer' "$worker_statefulset" | \
+  grep -q 'WORKSPACE_RECLAIMER_INTERVAL_SECONDS'
+grep -A30 'name: workspace-reclaimer' "$worker_statefulset" | \
+  grep -q 'WORKSPACE_RECLAIMER_GRACE_SECONDS'
+grep -A32 'name: workspace-reclaimer' "$worker_statefulset" | \
+  grep -q 'WORKSPACE_RECLAIMER_CONFIRMATIONS'
 
 echo "workflow cost-control tests passed"

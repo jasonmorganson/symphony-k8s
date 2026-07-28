@@ -151,6 +151,46 @@ spec:
               mountPath: /etc/ssh/authorized-keys/authorized_keys
               subPath: authorized_keys
               readOnly: true
+        - name: workspace-reclaimer
+          image: symphony-worker
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - /usr/local/bin/workspace-reclaimer
+          env:
+            - name: LINEAR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: symphony-secrets
+                  key: LINEAR_API_KEY
+            - name: SYMPHONY_STATE_URL
+              value: http://symphony-orchestrator:4000/api/v1/state
+            - name: WORKSPACE_RECLAIMER_INTERVAL_SECONDS
+              value: "600"
+            - name: WORKSPACE_RECLAIMER_GRACE_SECONDS
+              value: "3600"
+            - name: WORKSPACE_RECLAIMER_CONFIRMATIONS
+              value: "2"
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: workspaces
+              mountPath: /srv/symphony/workspaces
+            - name: workspaces
+              mountPath: /srv/worker-data
       volumes:
         - name: codex-chatgpt-auth
           secret:

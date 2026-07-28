@@ -40,6 +40,8 @@ jobs:
         run: bash tests/test-worker-auth.sh
       - name: Test workspace bootstrap
         run: bash tests/test-workspace-bootstrap.sh
+      - name: Test workspace reclamation
+        run: python3 -m unittest -v tests/test_workspace_reclaimer.py
       - name: Test workflow cost controls
         run: bash tests/test-workflow-cost-controls.sh
       - name: Test workflow overlay rendering
