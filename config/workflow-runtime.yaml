@@ -42,15 +42,6 @@ hooks:
 agent:
   max_concurrent_agents: 10
   max_turns: 10
-  continuation_delay_ms_by_state:
-    In Progress: 60000
-    Merging: 60000
-    Rework: 60000
-  dispatch_state_order:
-    - Merging
-  dispatch_priority_labels:
-    - production-gate
-    - main-ci
 codex:
   command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=medium --config agents.max_threads=3 --model gpt-5.6 app-server
   approval_policy: never

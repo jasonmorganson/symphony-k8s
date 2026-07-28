@@ -35,23 +35,17 @@ overlay_line="$(grep -nF '# Deployment overlay' "$TEMP_DIR/rendered.md" | cut -d
 "$ROOT_DIR/scripts/render-workflow.sh" \
   "$runtime" "$canonical" "$ROOT_DIR/config/workflow-throughput-overlay.md" \
   > "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'During normal Symphony workpad reconciliation' \
+grep -Fqx '# DOKS Linear-read guard' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'finite page size of at most 25' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'This read guard does not alter upstream' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq '## Exact-state validation evidence' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq '## Parallel merge preparation and final-writer lease' \
+grep -Fq 'dispatch, review, Merging, landing, or Linear-transition behavior.' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq '"action":"yield"' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq '"action":"acquire"' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq '"action":"release"' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'head_sha' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'main_sha' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'config_digest' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'never replaces required GitHub' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'add its missing matching label through the workflow' \
-  "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'same workflow-owned create/update sequence' \
-  "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'out-of-band Linear mutation' "$TEMP_DIR/throughput-rendered.md"
+if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
+    "$TEMP_DIR/throughput-rendered.md"; then
+  echo "throughput overlay must not serialize Merging work" >&2
+  exit 1
+fi
 
 if "$ROOT_DIR/scripts/render-workflow.sh" \
     "$runtime" "$canonical" "$TEMP_DIR/missing.md" >/dev/null 2>&1; then

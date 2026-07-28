@@ -53,11 +53,6 @@ if [[ ! -f "$throughput_overlay_file" ]]; then
   exit 1
 fi
 workflow_repository="$(git -C "$(dirname "$workflow_file")" rev-parse --show-toplevel)"
-policy_file="$workflow_repository/.config/symphony/requester-policy.json"
-if [[ ! -f "$policy_file" ]]; then
-  printf 'Missing canonical requester policy: %s\n' "$policy_file" >&2
-  exit 1
-fi
 if [[ "${SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE:-0}" == "1" ]]; then
   if [[ "$(git -C "$workflow_repository" branch --show-current)" != "main" ]]; then
     printf 'Canonical workflow source must be checked out on main: %s\n' "$workflow_repository" >&2
@@ -133,18 +128,6 @@ write_if_changed "$workflow_dir/WORKFLOW.md" "$(
   "$ROOT_DIR/scripts/render-workflow.sh" \
     "$runtime_file" "$workflow_file" "$throughput_overlay_file"
 )"
-cp "$policy_file" "$workflow_dir/requester-policy.json"
-PYTHONPATH="$ROOT_DIR" python3 - "$workflow_dir/requester-policy.json" <<'PY'
-import sys
-
-from autoscaler.scaler import load_requester_policy
-
-try:
-    load_requester_policy(sys.argv[1])
-except Exception as error:
-    print(f"Invalid canonical requester policy: {error}", file=sys.stderr)
-    raise SystemExit(1) from error
-PY
 write_if_changed "$workflow_dir/workflow-source.json" "$(printf \
-  '{"repository":"%s","revision":"%s","workflow":"WORKFLOW.md","requester_policy":".config/symphony/requester-policy.json","deployment_overlay":"config/workflow-throughput-overlay.md"}' \
+  '{"repository":"%s","revision":"%s","workflow":"WORKFLOW.md","deployment_overlay":"config/workflow-throughput-overlay.md"}' \
   "$(git -C "$workflow_repository" config --get remote.origin.url)" "$workflow_revision")"

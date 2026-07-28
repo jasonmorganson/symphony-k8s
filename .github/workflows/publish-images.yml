@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - autoscaler/**
+      - .dockerignore
+      - Cargo.lock
+      - Cargo.toml
+      - rust-toolchain.toml
+      - rust/**
       - config/**
       - docker/**
       - k8s/**
@@ -14,7 +18,11 @@ on:
   push:
     branches: [master]
     paths:
-      - autoscaler/**
+      - .dockerignore
+      - Cargo.lock
+      - Cargo.toml
+      - rust-toolchain.toml
+      - rust/**
       - config/**
       - docker/**
       - k8s/**
@@ -30,18 +38,29 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
       - name: Install pinned Kustomize
         run: |
           bash scripts/install-kustomize.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      - name: Test autoscaler
-        run: PYTHONPATH=autoscaler python3 -m unittest -v autoscaler/test_scaler.py
+      - name: Validate Rust control plane
+        run: |
+          cargo +1.97.1 fmt --all -- --check
+          cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
+          cargo +1.97.1 test --workspace --all-targets --locked
+      - name: Validate Rust images
+        run: |
+          docker build -t symphony-runtime-base:test -f docker/runtime-base/Dockerfile .
+          docker build \
+            --build-arg RUNTIME_BASE=symphony-runtime-base:test \
+            -t symphony-worker:test \
+            -f docker/worker/Dockerfile .
+          docker build -t symphony-autoscaler:test -f docker/autoscaler/Dockerfile .
       - name: Test worker authentication
         run: bash tests/test-worker-auth.sh
       - name: Test workspace bootstrap
         run: bash tests/test-workspace-bootstrap.sh
-      - name: Test workspace reclamation
-        run: python3 -m unittest -v tests/test_workspace_reclaimer.py
       - name: Test workflow cost controls
         run: bash tests/test-workflow-cost-controls.sh
       - name: Test workflow overlay rendering

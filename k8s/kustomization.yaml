@@ -13,7 +13,6 @@ configMapGenerator:
   - name: symphony-workflow
     files:
       - WORKFLOW.md=base/generated/skaffold/workflow/WORKFLOW.md
-      - requester-policy.json=base/generated/skaffold/workflow/requester-policy.json
       - workflow-source.json=base/generated/skaffold/workflow/workflow-source.json
 
 secretGenerator:

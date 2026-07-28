@@ -128,7 +128,7 @@ assert_codex_recovery() {
   ensure_codex_chatgpt_session 2>"$tmp/error.log"
 
   if [[ -f "$tmp/syncs" ]]; then
-    syncs="$(wc -l < "$tmp/syncs")"
+    syncs="$(wc -l < "$tmp/syncs" | tr -d '[:space:]')"
   fi
   [[ "$syncs" == "$expected_syncs" ]]
   if [[ "$mode" == broken ]]; then
