@@ -113,6 +113,15 @@ spec:
                 - test -f /run/symphony-worker-ready
             periodSeconds: 10
             timeoutSeconds: 5
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -f /run/symphony-worker-ready
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
           livenessProbe:
             tcpSocket:
               port: ssh
