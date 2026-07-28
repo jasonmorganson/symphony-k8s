@@ -83,6 +83,92 @@ if [[ "$*" == *"-n symphony get deployment symphony-autoscaler "* ]] &&
   exit 0
 fi
 
+if [[ "$*" == *"-n symphony get deployment symphony-orchestrator "* ]] &&
+    [[ "$*" == *'containers[?(@.name=="orchestrator")].image'* ]]; then
+  printf '%s' "${ORCHESTRATOR_DEPLOYED_IMAGE:-$ORCHESTRATOR_IMAGE}"
+  exit 0
+fi
+
+if [[ "$*" == *"-n symphony get deployment symphony-autoscaler "* ]] &&
+    [[ "$*" == *'containers[?(@.name=="autoscaler")].image'* ]]; then
+  printf '%s' "${AUTOSCALER_DEPLOYED_IMAGE:-$AUTOSCALER_IMAGE}"
+  exit 0
+fi
+
+if [[ "$*" == *"-n symphony get "*"source-revision"* ]]; then
+  printf '%s' "${DEPLOYED_SOURCE_REVISION:-$SOURCE_REVISION}"
+  exit 0
+fi
+
+if [[ "$*" == *"-n symphony get pods -l app=symphony-orchestrator -o json"* ]]; then
+  image="${ORCHESTRATOR_RUNTIME_IMAGE:-$ORCHESTRATOR_IMAGE}"
+  digest="${image##*@}"
+  jq -cn --arg image "$image" --arg digest "$digest" '
+    {items: [{
+      metadata: {name: "symphony-orchestrator-0"},
+      spec: {containers: [{name: "orchestrator", image: $image}]},
+      status: {
+        conditions: [{type: "Ready", status: "True"}],
+        containerStatuses: [{
+          name: "orchestrator",
+          ready: true,
+          imageID: ("docker-pullable://orchestrator@" + $digest)
+        }]
+      }
+    }]}'
+  exit 0
+fi
+
+if [[ "$*" == *"-n symphony get pods -l app=symphony-autoscaler -o json"* ]]; then
+  image="${AUTOSCALER_RUNTIME_IMAGE:-$AUTOSCALER_IMAGE}"
+  digest="${image##*@}"
+  replicas="${AUTOSCALER_REPLICAS:-1}"
+  jq -cn --arg image "$image" --arg digest "$digest" --argjson replicas "$replicas" '
+    {items: [range(0; $replicas) | {
+      metadata: {name: ("symphony-autoscaler-" + (. | tostring))},
+      spec: {containers: [{name: "autoscaler", image: $image}]},
+      status: {
+        conditions: [{type: "Ready", status: "True"}],
+        containerStatuses: [{
+          name: "autoscaler",
+          ready: true,
+          imageID: ("docker-pullable://autoscaler@" + $digest)
+        }]
+      }
+    }]}'
+  exit 0
+fi
+
+if [[ "$*" == *"-n symphony get pods -l app=symphony-worker -o json"* ]]; then
+  image="${WORKER_RUNTIME_IMAGE:-$WORKER_IMAGE}"
+  digest="${image##*@}"
+  replicas="${WORKER_REPLICAS:-2}"
+  jq -cn --arg image "$image" --arg digest "$digest" --argjson replicas "$replicas" '
+    {items: [range(0; $replicas) | {
+      metadata: {name: ("symphony-worker-" + (. | tostring))},
+      spec: {containers: [
+        {name: "worker", image: $image},
+        {name: "workspace-reclaimer", image: $image}
+      ]},
+      status: {
+        conditions: [{type: "Ready", status: "True"}],
+        containerStatuses: [
+          {
+            name: "worker",
+            ready: true,
+            imageID: ("docker-pullable://worker@" + $digest)
+          },
+          {
+            name: "workspace-reclaimer",
+            ready: true,
+            imageID: ("docker-pullable://worker@" + $digest)
+          }
+        ]
+      }
+    }]}'
+  exit 0
+fi
+
 if [[ "$*" == *"-n symphony exec deployment/symphony-orchestrator "* ]]; then
   payload="$(cat)"
   printf '%s\n' "$payload" >> "$DRAIN_LOG"
@@ -121,7 +207,14 @@ if [[ "$*" == *" get statefulset symphony-worker "* ]] &&
   exit 0
 fi
 
-if [[ "$*" == *" get statefulset symphony-worker "* ]]; then
+if [[ "$*" == *" get statefulset symphony-worker "* ]] &&
+    [[ "$*" == *'containers[?(@.name=="worker")].image'* ]]; then
+  printf '%s' "${WORKER_DEPLOYED_IMAGE:-$WORKER_IMAGE}"
+  exit 0
+fi
+
+if [[ "$*" == *" get statefulset symphony-worker "* ]] &&
+    [[ "$*" == *'containers[?(@.name=="workspace-reclaimer")].image'* ]]; then
   printf '%s' "${WORKER_DEPLOYED_IMAGE:-$WORKER_IMAGE}"
   exit 0
 fi
@@ -249,6 +342,18 @@ assert_restored() {
     "$KUBECTL_LOG" >/dev/null
 }
 
+assert_quiesced() {
+  jq -se \
+    '.[-1].drained_worker_hosts == ["worker-0", "worker-1"]' \
+    "$DRAIN_LOG" >/dev/null
+  if grep -F -- \
+      "-n symphony scale deployment/symphony-autoscaler --replicas=1" \
+      "$KUBECTL_LOG"; then
+    echo "failed rollout must not restore autoscaler admissions" >&2
+    exit 1
+  fi
+}
+
 run_deploy() {
   KUBECTL="$TEMP_DIR/kubectl" \
     KUSTOMIZE="$TEMP_DIR/kustomize" \
@@ -318,6 +423,13 @@ grep -F "annotate --overwrite deployment/symphony-orchestrator deployment/sympho
 grep -F -- "-n symphony rollout status deployment/symphony-orchestrator --timeout=20m" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-autoscaler --timeout=10m" "$KUBECTL_LOG"
 grep -F -- "-n symphony get statefulset symphony-worker -o jsonpath=" "$KUBECTL_LOG"
+grep -F -- "-n symphony delete pod/symphony-worker-1 --wait=true --timeout=5m" "$KUBECTL_LOG"
+grep -F -- "-n symphony wait --for=condition=Ready pod/symphony-worker-1 --timeout=20m" "$KUBECTL_LOG"
+grep -F -- "-n symphony delete pod/symphony-worker-0 --wait=true --timeout=5m" "$KUBECTL_LOG"
+grep -F -- "-n symphony wait --for=condition=Ready pod/symphony-worker-0 --timeout=20m" "$KUBECTL_LOG"
+grep -F -- "-n symphony get pods -l app=symphony-orchestrator -o json" "$KUBECTL_LOG"
+grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+grep -F -- "-n symphony get pods -l app=symphony-autoscaler -o json" "$KUBECTL_LOG"
 for deployment in coredns konnectivity-agent hubble-relay hubble-ui; do
   grep -F -- "-n kube-system patch deployment $deployment --type=strategic" "$KUBECTL_LOG"
   grep -F -- "-n kube-system rollout status deployment/$deployment --timeout=5m" "$KUBECTL_LOG"
@@ -460,14 +572,14 @@ if KUBECTL_FAIL_APPLY=1 run_deploy; then
   echo "apply failure must fail deployment" >&2
   exit 1
 fi
-assert_restored
+assert_quiesced
 
 reset_logs
 if KUBECTL_FAIL_ROLLOUT=symphony-orchestrator run_deploy; then
   echo "orchestrator rollout failure must fail deployment" >&2
   exit 1
 fi
-assert_restored
+assert_quiesced
 
 reset_logs
 wrong_worker_image="ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -475,7 +587,7 @@ if WORKER_DEPLOYED_IMAGE="$wrong_worker_image" run_deploy; then
   echo "worker verification failure must fail deployment" >&2
   exit 1
 fi
-assert_restored
+assert_quiesced
 
 reset_logs
 DRAIN_FAIL_AT=3 run_deploy

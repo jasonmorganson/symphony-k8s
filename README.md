@@ -413,14 +413,18 @@ docker push ghcr.io/jasonmorganson/symphony-k8s-autoscaler:20260712
 ```
 
 Merges to `master` automatically build all three images, resolve immutable
-digests, wait up to 60 minutes for Symphony's `.running` list to become empty,
+digests, wait up to four hours for Symphony's `.running` list to become empty,
 and deploy through GitHub Actions. Before waiting for idle, deployment snapshots
 the existing worker drains, pauses the autoscaler, and drains every worker from
 new admissions. Active sessions continue normally; retrying issues do not block a
-rollout. The deployment holds the autoscaler at zero through the orchestrator
-rollout, then restores the exact prior drains and autoscaler replica count on
-success or failure. An unavailable or malformed state endpoint fails closed
-before any provider or
+rollout. The deployment holds the autoscaler at zero until the orchestrator and
+every `OnDelete` worker pod are running the requested immutable digests. It
+verifies source annotations, workload templates, and ready pod image IDs before
+restoring the exact prior drain set, then restores and verifies the autoscaler.
+A failure after apply keeps admissions quiesced unless their final restoration
+already succeeded; a pre-apply failure restores the original admission state.
+An unavailable or malformed state endpoint fails
+closed before any provider or
 cluster mutation. The `production` GitHub environment supplies
 `DIGITALOCEAN_ACCESS_TOKEN`; restrict that token to
 `kubernetes:access_cluster`, `kubernetes:update`, and the required read scopes.
@@ -462,9 +466,9 @@ toleration. Override the provider targets with `DOKS_CLUSTER` and
 `SYMPHONY_WORKER_MIN_NODES` and `SYMPHONY_WORKER_MAX_NODES`. Run the wrapper
 after every DOKS upgrade as well as every Symphony deployment so provider-managed
 add-on changes cannot leave critical replicas stranded on an autoscaled worker
-node and block scale-to-zero. The wrapper verifies orchestrator and autoscaler
-rollouts and checks the worker StatefulSet template digest without restarting
-existing `OnDelete` worker pods.
+node and block scale-to-zero. The wrapper replaces drained `OnDelete` worker
+pods from highest to lowest ordinal, waits for each replacement to become ready,
+and refuses success unless every runtime image ID matches its requested digest.
 
 Never commit or retain `k8s/base/generated`: it temporarily contains plaintext
 secret inputs. Remove the generated directory immediately after bootstrap or
