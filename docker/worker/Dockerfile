@@ -22,10 +22,12 @@ COPY config/sshd_config.d/worker.conf /etc/ssh/sshd_config.d/worker.conf
 COPY docker/worker/entrypoint.sh /usr/local/bin/worker-entrypoint.sh
 COPY docker/worker/bootstrap-arrusted-workspace.sh /usr/local/bin/bootstrap-arrusted-workspace
 COPY docker/worker/install-workspace-branch-guard.sh /usr/local/bin/install-workspace-branch-guard
+COPY docker/worker/workspace_reclaimer.py /usr/local/bin/workspace-reclaimer
 RUN chmod +x \
     /usr/local/bin/worker-entrypoint.sh \
     /usr/local/bin/bootstrap-arrusted-workspace \
-    /usr/local/bin/install-workspace-branch-guard
+    /usr/local/bin/install-workspace-branch-guard \
+    /usr/local/bin/workspace-reclaimer
 
 EXPOSE 22
 ENTRYPOINT ["/usr/local/bin/worker-entrypoint.sh"]
