@@ -21,6 +21,20 @@ external event such as GitHub checks, deployment verification, or human review:
 Do not checkpoint while an actionable diff, merge conflict, reviewer comment, deterministic
 failure, or other repository task remains.
 
+## Bounded Linear reads
+
+Use the issue snapshot already supplied by Symphony and the durable workpad as the normal source
+of issue context. Do not issue an unbounded Linear GraphQL query for issue history, comments,
+attachments, relations, or workpad content. When an authoritative refresh is necessary, request
+only the fields needed for the current decision, use a finite page size of at most 25, and paginate
+only until that decision can be made. Summarize the result in the workpad; do not copy a complete
+GraphQL response into the conversation.
+
+On continuation, reuse the summary unless the relevant Linear field may have changed. A missing or
+ambiguous bounded result may be refreshed with another bounded query, but must not be replaced by a
+full-history query. This protects the agent transport from oversized tool responses while
+preserving authoritative Linear verification and workflow-owned writes.
+
 ## Parallel merge preparation and final-writer lease
 
 Merging preparation is parallel: synchronize the branch, resolve conflicts, address review,
