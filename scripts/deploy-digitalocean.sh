@@ -487,6 +487,12 @@ if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
   require_nonnegative_integer "live Symphony worker replicas" "$live_worker_replicas"
   live_worker_image="$("$KUBECTL" -n symphony get statefulset symphony-worker \
     -o jsonpath='{.spec.template.spec.containers[?(@.name=="worker")].image}')"
+  if [[ "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART" == "true" ]]; then
+    validate_image "live worker image" "$live_worker_image" \
+      "ghcr.io/jasonmorganson/symphony-k8s-worker"
+    WORKER_IMAGE="$live_worker_image"
+    echo "worker inputs are unchanged; preserving live image $WORKER_IMAGE"
+  fi
 fi
 
 TEMP_DIR="$(mktemp -d)"
@@ -591,8 +597,7 @@ if (( image_override_count == 3 )); then
   verify_deployment_runtime_image \
     symphony-orchestrator orchestrator "$ORCHESTRATOR_IMAGE" 1
   if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
-    if [[ "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART" == "true" &&
-          "$live_worker_image" == "$WORKER_IMAGE" ]]; then
+    if [[ "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART" == "true" ]]; then
       echo "worker image digest is unchanged; preserving active worker pods"
     else
       restart_worker_pods "$live_worker_replicas"

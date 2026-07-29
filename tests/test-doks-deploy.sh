@@ -451,9 +451,18 @@ WORKER_REPLICAS=7 run_deploy
 grep -F "build worker_replicas=7" "$KUSTOMIZE_LOG"
 
 reset_logs
-SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
+preserved_worker_image="ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+WORKER_DEPLOYED_IMAGE="$preserved_worker_image" \
+  SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
 if grep -F -- "-n symphony delete pod/symphony-worker-" "$KUBECTL_LOG"; then
   echo "unchanged worker image must preserve active worker pods" >&2
+  exit 1
+fi
+grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$preserved_worker_image" \
+  "$KUSTOMIZE_LOG"
+if grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$WORKER_IMAGE" \
+    "$KUSTOMIZE_LOG"; then
+  echo "unchanged worker inputs must reuse the live immutable image" >&2
   exit 1
 fi
 grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
