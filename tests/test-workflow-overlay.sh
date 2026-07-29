@@ -57,6 +57,30 @@ if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
   exit 1
 fi
 
+printf '%s\n' \
+  '# Canonical workflow' \
+  'Canonical instruction.' \
+  '# DOKS Linear-read guard' \
+  'Stale deployment overlay.' \
+  > "$TEMP_DIR/mounted-workflow.md"
+"$ROOT_DIR/docker/orchestrator/materialize-runtime-workflow.sh" \
+  "$TEMP_DIR/mounted-workflow.md" \
+  "$ROOT_DIR/config/workflow-throughput-overlay.md" \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx 'Canonical instruction.' "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
+if grep -Fq 'Stale deployment overlay.' "$TEMP_DIR/runtime-workflow.md"; then
+  echo "runtime workflow must replace the stale mounted deployment overlay" >&2
+  exit 1
+fi
+[[ "$(grep -Fc '# DOKS Linear-read guard' "$TEMP_DIR/runtime-workflow.md")" == 1 ]]
+grep -Fq '/tmp/symphony-workflow/WORKFLOW.md' \
+  "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
+grep -Fq 'materialize-runtime-workflow.sh' \
+  "$ROOT_DIR/docker/orchestrator/entrypoint.sh"
+
 if "$ROOT_DIR/scripts/render-workflow.sh" \
     "$runtime" "$canonical" "$TEMP_DIR/missing.md" >/dev/null 2>&1; then
   echo "missing throughput overlay must fail closed" >&2
