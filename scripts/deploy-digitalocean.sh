@@ -20,6 +20,7 @@ SYMPHONY_IDLE_POLL_SECONDS="${SYMPHONY_IDLE_POLL_SECONDS:-30}"
 SYMPHONY_REUSE_ORCHESTRATOR_IMAGE="${SYMPHONY_REUSE_ORCHESTRATOR_IMAGE:-false}"
 SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART="${SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART:-false}"
 SYMPHONY_REUSE_AUTOSCALER_IMAGE="${SYMPHONY_REUSE_AUTOSCALER_IMAGE:-false}"
+SYMPHONY_WORKER_AFFINITY_SEED_FILE="${SYMPHONY_WORKER_AFFINITY_SEED_FILE:-}"
 SYMPHONY_STATE_PATH="${SYMPHONY_STATE_PATH:-/api/v1/namespaces/symphony/services/http:symphony-orchestrator:4000/proxy/api/v1/state}"
 SOURCE_REVISION="${SOURCE_REVISION:-}"
 ORCHESTRATOR_IMAGE="${ORCHESTRATOR_IMAGE:-}"
@@ -149,6 +150,35 @@ set_worker_drains() {
     '(.drained_hosts | sort) == ($expected | sort) and
       (.active_drained_hosts | type) == "array"' >/dev/null; then
     fail "invalid Symphony worker drain acknowledgement"
+  fi
+}
+
+seed_worker_affinities() {
+  local seed_file="$1"
+  local seed
+
+  [[ -f "$seed_file" ]] || fail "worker affinity seed file does not exist: $seed_file"
+  seed="$("$JQ" -ce --argjson configured "$QUIESCED_DRAINS_JSON" '
+    if .version == 1 and (.affinities | type) == "object" and
+      ([.affinities | to_entries[] |
+        (.key | type == "string" and length > 0) and
+        (.value as $host |
+          ($host | type == "string") and ($configured | index($host)) != null)] | all)
+    then . else error("invalid worker affinity seed") end
+  ' "$seed_file")"
+
+  refresh_kubeconfig
+  if ! printf '%s' "$seed" | "$KUBECTL" -n symphony exec \
+    deployment/symphony-orchestrator -c orchestrator -i -- sh -ceu '
+      path=/srv/symphony/workspaces/.worker-affinities.json
+      temporary="${path}.tmp"
+      test ! -e "$path"
+      umask 077
+      cat > "$temporary"
+      sync "$temporary"
+      mv "$temporary" "$path"
+    '; then
+    fail "unable to atomically seed Symphony worker affinities"
   fi
 }
 
@@ -569,6 +599,9 @@ if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
   # restart immediately; an operator may opt into a graceful idle wait.
   wait_for_symphony_state false
   quiesce_symphony
+  if [[ -n "$SYMPHONY_WORKER_AFFINITY_SEED_FILE" ]]; then
+    seed_worker_affinities "$SYMPHONY_WORKER_AFFINITY_SEED_FILE"
+  fi
   if [[ "$SYMPHONY_WAIT_FOR_IDLE" == "true" ]]; then
     wait_for_symphony_state true
   fi

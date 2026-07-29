@@ -9,6 +9,17 @@ Do not replace a missing or ambiguous bounded result with an unbounded query for
 comments, attachments, relations, or workpad content. This read guard does not alter upstream
 dispatch, Merging, landing, or Linear-transition behavior.
 
+# Preserve active issue state across orchestration control flow
+
+Never move an existing active issue in `In Progress`, `Human Review`, `Merging`, or `Rework` to
+`Backlog` as a retry, yield, defer, interruption, max-turn, restart, capacity, or scheduler-control
+mechanism. On interruption, leave the issue state unchanged so Symphony can resume it through the
+normal active-state lane.
+
+For a real external blocker, use the canonical documented `Human Review` escape and preserve its
+required evidence. `Backlog` is reserved for newly created out-of-scope follow-up issues; it is not
+a parking state for work Symphony has already admitted.
+
 # Human Review maintenance lane
 
 Treat `Human Review` as an active maintenance lane, not as approval to resume product work. Inspect

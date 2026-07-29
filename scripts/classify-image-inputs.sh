@@ -16,12 +16,11 @@ force_all() {
   reason+=("$1")
 }
 
-paths=("$@")
-if (( ${#paths[@]} == 0 )); then
+if (( $# == 0 )); then
   force_all "empty change set"
 fi
 
-for path in "${paths[@]}"; do
+for path in "$@"; do
   case "$path" in
     .dockerignore | docker-bake.hcl | skaffold.yaml | \
     .github/workflows/*)

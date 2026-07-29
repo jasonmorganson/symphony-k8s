@@ -41,6 +41,12 @@ grep -Fq 'This read guard does not alter upstream' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'dispatch, Merging, landing, or Linear-transition behavior.' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Preserve active issue state across orchestration control flow' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Never move an existing active issue in `In Progress`, `Human Review`, `Merging`, or `Rework`' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq '`Backlog` is reserved for newly created out-of-scope follow-up issues' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'one consolidated required review panel' "$TEMP_DIR/throughput-rendered.md"
@@ -210,6 +216,10 @@ if grep -Fqx '  max_concurrent_agents: 1' "$TEMP_DIR/runtime-workflow.md"; then
 fi
 grep -Fqx 'Canonical instruction.' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Preserve active issue state across orchestration control flow' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fq 'On interruption, leave the issue state unchanged' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Durable review proof across session boundaries' \
   "$TEMP_DIR/runtime-workflow.md"

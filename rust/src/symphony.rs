@@ -28,6 +28,8 @@ pub struct WorkerPool {
     pub drained_hosts: Vec<String>,
     pub available_hosts: Vec<String>,
     pub available_slots: u32,
+    #[serde(default)]
+    pub required_hosts: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
