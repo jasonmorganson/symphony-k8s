@@ -45,6 +45,50 @@ grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'one consolidated required review panel' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'authoritative final gate on the final tree' "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Durable review proof across session boundaries' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'completed Review Batch remains valid across a continuation' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'committed, staged, unstaged, untracked' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'do not launch another panel solely because the session' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Fail closed and run the canonical required review again' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq "never satisfies or replaces the primary agent's authoritative final gate" \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Bound work when the reported failure does not reproduce' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'make an explicit scope decision' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'new repository-wide enforcement framework' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Failure to reproduce does not waive any remaining acceptance criterion' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Freeze a published head while its evidence is pending' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'keep the code-bearing tree fixed' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not add speculative cleanup, helper extraction, extra tests' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'only in response to a concrete classified check failure' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'produce one bounded remediation batch' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Do not wait for a CI job that is not part of the current gate' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'inspect the checked workflow, its change classifier' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'acceptance criteria assign its authoritative proof' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not retry, edit code, or hold a review-ready issue' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Fail closed when a ruleset-required or acceptance-required pre-merge job' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Serialize gates that share repository-visible temporary state' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Run gates sequentially when either gate creates' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'orchestration interference, not a product finding' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'explicit scope-budget decision in the durable workpad' \
   "$TEMP_DIR/throughput-rendered.md"
@@ -76,6 +120,16 @@ printf '%s\n' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx 'Canonical instruction.' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Durable review proof across session boundaries' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Bound work when the reported failure does not reproduce' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Freeze a published head while its evidence is pending' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Do not wait for a CI job that is not part of the current gate' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Serialize gates that share repository-visible temporary state' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/runtime-workflow.md"

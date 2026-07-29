@@ -22,6 +22,81 @@ If any commit introduces substantive runtime behavior, a security or data bounda
 migration, or an independently reviewable deployment change, use the canonical review behavior
 for that change instead of classifying it as mechanical.
 
+# Durable review proof across session boundaries
+
+A completed Review Batch remains valid across a continuation, retry, max-turn restart, or worker
+change only when the durable workpad records the completed batch, its required review coverage,
+all findings and dispositions, the exact comparison base, and an exact content fingerprint of the
+reviewed code-bearing tree. The fingerprint must include committed, staged, unstaged, untracked,
+generated, and lockfile content. On resume, verify that the recorded comparison base, tree
+fingerprint, and required review scope still match. When they match and no finding remains
+unresolved, reuse that exact Review Batch; do not launch another panel solely because the session
+boundary changed.
+
+Fail closed and run the canonical required review again when the evidence or fingerprint is
+missing or ambiguous, the comparison base or acceptance or review scope changed, a finding is
+unresolved or newly applicable, or any code-bearing content changed after review. Workpad, logs,
+comments, and other evidence-only updates do not invalidate an otherwise exact match. Reusing a
+Review Batch never satisfies or replaces the primary agent's authoritative final gate, required
+CI, deployment checks, or fresh remote proof.
+
+# Bound work when the reported failure does not reproduce
+
+When the issue's exact pinned reproduction succeeds or the reported failure otherwise does not
+reproduce, record the exact command, revision, environment, and result in the durable workpad
+before changing code. Then make an explicit scope decision: either complete the issue with
+evidence when its acceptance criteria are already satisfied, or implement the smallest
+deterministic regression or correction still required by those criteria.
+
+Do not turn a stale or non-reproducing report into a new repository-wide enforcement framework,
+generator, or policy unless an acceptance criterion requires that wider surface or the narrow
+path is proven insufficient. Record that proof and the bounded expansion before implementation.
+Failure to reproduce does not waive any remaining acceptance criterion, required review, final
+gate, CI, deployment check, or workflow-owned transition.
+
+# Freeze a published head while its evidence is pending
+
+After the accepted implementation is committed and pushed and exact-head checks or review are in
+progress, keep the code-bearing tree fixed. Observe and classify the published evidence before
+editing again. Do not add speculative cleanup, helper extraction, extra tests, generated changes,
+or other unrequested remediation merely because the issue remains active or a new Symphony turn
+begins.
+
+Change the published tree only in response to a concrete classified check failure, review finding,
+newly discovered acceptance gap, stale-base repair, or other recorded evidence that the current
+head cannot satisfy the issue. Record that trigger and its mapping before editing, then
+produce one bounded remediation batch and rerun the review and gates invalidated by that batch.
+This freeze does not prevent required feedback fixes, current-main synchronization, or
+workflow-owned transitions.
+
+# Do not wait for a CI job that is not part of the current gate
+
+Before waiting for a named pull-request job, inspect the checked workflow, its change classifier,
+the repository ruleset, and the issue's acceptance criteria. If that job is intentionally not
+scheduled for the pull request and the acceptance criteria assign its authoritative proof to a
+post-merge or containing-main run, record the absent PR job and proceed once every actual
+pre-merge gate is satisfied. Do not retry, edit code, or hold a review-ready issue for a job that
+the repository will not create.
+
+Fail closed when a ruleset-required or acceptance-required pre-merge job is unexpectedly absent,
+skipped, stale, or ambiguous. This rule only distinguishes the designed proof stage; it never
+waives the required containing-main, deployment, or other later evidence.
+
+# Serialize gates that share repository-visible temporary state
+
+Before running independent final gates concurrently, verify that they are hermetic with respect to
+the checkout and every workspace path scanned by package, graph, generator, lockfile, or inventory
+discovery. Run gates sequentially when either gate creates, removes, or mutates repository-visible
+temporary proof workspaces, generated files, lockfiles, caches, or discovery inputs that the other
+gate can observe. A transient failure caused by one gate observing another gate's temporary state
+is orchestration interference, not a product finding; wait for cleanup and rerun the affected gates
+sequentially without expanding implementation scope.
+
+Prefer placing temporary proof workspaces outside the scanned repository graph when the canonical
+test supports it. Concurrency is still allowed for gates whose inputs and outputs are proven
+isolated. Record the isolation decision when parallel execution materially affects the completion
+timeline.
+
 # Dependency-upgrade scope budget
 
 Before a dependency upgrade expands into replacing a provider-facing development tool, record an
