@@ -9,6 +9,41 @@ Do not replace a missing or ambiguous bounded result with an unbounded query for
 comments, attachments, relations, or workpad content. This read guard does not alter upstream
 dispatch, Merging, landing, or Linear-transition behavior.
 
+# Human Review maintenance lane
+
+Treat `Human Review` as an active maintenance lane, not as approval to resume product work. Inspect
+only the issue's current attached pull request, required checks and provider evidence, and durable
+workpad or child-issue coordination facts. Perform maintenance only when current evidence identifies
+one of these concrete readiness defects:
+
+- the single unambiguous attached open pull request conflicts with or is stale against its freshly
+  fetched target branch;
+- a required check or provider proof is failing, missing, or stale for the attached pull request;
+  or
+- the durable workpad or parent/child coordination record is stale relative to current pull-request,
+  gate, or child-issue facts.
+
+For an attached pull request, preserve its accepted scope and repair only the concrete conflict,
+check failure, or evidence defect on that same branch and pull request. Run only the validation
+invalidated by the repair, then refresh the exact readiness evidence. For coordination-only parent
+issues, reconcile current facts in the existing workpad; do not create a parent branch or pull
+request. A merged or closed attached pull request is evidence to reconcile, not authorization to
+reopen it, create a successor, or perform more implementation.
+
+This lane must never merge, close, or approve a pull request; infer, manufacture, dismiss, or replace
+human approval; transition the issue to `Merging`, `Done`, `In Progress`, `Rework`, or any other
+state; broaden acceptance criteria; add product scope; perform generalized cleanup; or create a new
+branch or pull request. Preserve explicit human approval and all canonical review, CI, deployment,
+credential-isolation, and final-gate requirements. Maintenance that changes the pull-request head
+must report the new head and current approval/evidence truth without claiming that an approval for
+an older head remains current.
+
+After the bounded maintenance is complete, or when no listed readiness defect is actionable, leave
+the issue in `Human Review` and call `symphony_report_turn_outcome` with outcome `defer` as the final
+tool action. State in the reason whether maintenance completed or current external/human evidence is
+unchanged. This hint schedules only a bounded authoritative tracker recheck; it never represents
+approval or a tracker transition.
+
 # Consolidated review for mechanical main-CI repairs
 
 When a main-CI repair is a sequence of mechanical or generated-only commits, finish the complete

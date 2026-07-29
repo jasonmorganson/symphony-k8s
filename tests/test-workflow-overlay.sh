@@ -100,11 +100,24 @@ grep -Fq 'explicit authenticated fetch of the target branch' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Staleness alone never returns an authorized issue to `Human Review`' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -A1 '^  observed_states:$' "$ROOT_DIR/config/workflow-runtime.yaml" |
+grep -Fqx '# Human Review maintenance lane' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Treat `Human Review` as an active maintenance lane' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'repair only the concrete conflict' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'do not create a parent branch or pull' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'must never merge, close, or approve a pull request' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'transition the issue to `Merging`, `Done`, `In Progress`, `Rework`' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'broaden acceptance criteria' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'leave the issue in `Human Review` and call' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'outcome `defer` as the final' "$TEMP_DIR/throughput-rendered.md"
+grep -A6 '^  active_states:$' "$ROOT_DIR/config/workflow-runtime.yaml" |
   grep -Fq '    - Human Review'
-if grep -A5 '^  active_states:$' "$ROOT_DIR/config/workflow-runtime.yaml" |
+if grep -A5 '^  observed_states:$' "$ROOT_DIR/config/workflow-runtime.yaml" |
     grep -Fq 'Human Review'; then
-  echo "Human Review must remain excluded from active states" >&2
+  echo "Human Review must not be duplicated in observed states" >&2
   exit 1
 fi
 grep -Fq 'exact fetched target SHA and the ancestry result' \

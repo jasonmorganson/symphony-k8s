@@ -343,7 +343,10 @@ input tokens and 88 thousand output tokens; the later live total reached 68.9
 million input tokens. One issue consumed about 7.6 million input tokens across
 four agent turns. The optimized workflow uses medium rather than xhigh reasoning,
 permits one agent per worker,
-polls every 15 seconds, and does not dispatch agents for passive `Human Review`.
+polls every 15 seconds, and dispatches `Human Review` only for bounded readiness
+maintenance. That lane may repair an attached pull request's conflicts or concrete
+gate failure and reconcile stale evidence or coordination, but cannot infer approval,
+merge, broaden acceptance work, or transition the issue.
 It also bounds the Linear workpad and consolidates asynchronous review findings
 before a full-repository gate on the final code-bearing tree, avoiding repeated
 context resubmission and full validation for each overlapping review comment.
@@ -361,10 +364,12 @@ uses the model default.
 
 Current-session state, eligible demand, read-only observed issue dwell, and
 worker-pool capacity are available from Symphony's state API. `Human Review`
-is fetched in the same paced tracker request as active work, but remains
-excluded from demand and dispatch. Each observed entry includes its identifier,
-state, `updated_at`, and current `age_seconds`. Autoscaler health and capacity
-measurements are available from its metrics endpoint:
+is included in active demand and dispatch, and its prompt contract limits work
+to readiness maintenance while preserving explicit human approval. When no
+maintenance is actionable, the agent leaves the issue in `Human Review` and
+uses Symphony's bounded deferred recheck instead of consuming immediate turns.
+Autoscaler health and capacity measurements are available from its metrics
+endpoint:
 
 ```bash
 kubectl -n symphony port-forward svc/symphony-orchestrator 4000:4000
