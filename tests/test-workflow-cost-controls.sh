@@ -29,6 +29,8 @@ for custom_scheduler_key in \
 done
 
 grep -q 'render-workflow.sh' "$generator"
+grep -Fq 'tests/test-workflow-cost-controls.sh | \' \
+  "$ROOT_DIR/.github/workflows/publish-images.yml"
 grep -q 'workflow-throughput-overlay.md' "$generator"
 grep -q 'workflow-source.json' "$generator"
 grep -q 'SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE' "$generator"

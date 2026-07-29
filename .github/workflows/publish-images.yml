@@ -175,6 +175,7 @@ jobs:
                 case "$path" in
                   config/workflow-throughput-overlay.md | \
                   tests/test-workflow-overlay.sh | \
+                  tests/test-workflow-cost-controls.sh | \
                   scripts/render-workflow.sh | \
                   docker/orchestrator/*)
                     ;;
