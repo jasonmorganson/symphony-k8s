@@ -17,6 +17,7 @@ DOKS_REFRESH_KUBECONFIG="${DOKS_REFRESH_KUBECONFIG:-false}"
 SYMPHONY_WAIT_FOR_IDLE="${SYMPHONY_WAIT_FOR_IDLE:-false}"
 SYMPHONY_IDLE_TIMEOUT_SECONDS="${SYMPHONY_IDLE_TIMEOUT_SECONDS:-14400}"
 SYMPHONY_IDLE_POLL_SECONDS="${SYMPHONY_IDLE_POLL_SECONDS:-30}"
+SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART="${SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART:-false}"
 SYMPHONY_STATE_PATH="${SYMPHONY_STATE_PATH:-/api/v1/namespaces/symphony/services/http:symphony-orchestrator:4000/proxy/api/v1/state}"
 SOURCE_REVISION="${SOURCE_REVISION:-}"
 ORCHESTRATOR_IMAGE="${ORCHESTRATOR_IMAGE:-}"
@@ -424,6 +425,8 @@ validate_rendered_manifest() {
 require_boolean DEPLOY_BOOTSTRAP_RUNTIME "$DEPLOY_BOOTSTRAP_RUNTIME"
 require_boolean DOKS_REFRESH_KUBECONFIG "$DOKS_REFRESH_KUBECONFIG"
 require_boolean SYMPHONY_WAIT_FOR_IDLE "$SYMPHONY_WAIT_FOR_IDLE"
+require_boolean SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART \
+  "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART"
 require_nonnegative_integer SYMPHONY_WORKER_MIN_NODES "$WORKER_MIN_NODES"
 require_nonnegative_integer SYMPHONY_WORKER_MAX_NODES "$WORKER_MAX_NODES"
 require_storage_size SYMPHONY_WORKER_VOLUME_SIZE "$WORKER_VOLUME_SIZE"
@@ -461,6 +464,7 @@ required_addons=(coredns konnectivity-agent)
 optional_addons=(hubble-relay hubble-ui)
 addons=()
 live_worker_replicas=""
+live_worker_image=""
 
 for deployment in "${required_addons[@]}"; do
   resource="$("$KUBECTL" -n kube-system get deployment "$deployment" --ignore-not-found -o name)"
@@ -481,6 +485,8 @@ if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
   live_worker_replicas="$("$KUBECTL" -n symphony get statefulset symphony-worker \
     -o jsonpath='{.spec.replicas}')"
   require_nonnegative_integer "live Symphony worker replicas" "$live_worker_replicas"
+  live_worker_image="$("$KUBECTL" -n symphony get statefulset symphony-worker \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="worker")].image}')"
 fi
 
 TEMP_DIR="$(mktemp -d)"
@@ -585,7 +591,12 @@ if (( image_override_count == 3 )); then
   verify_deployment_runtime_image \
     symphony-orchestrator orchestrator "$ORCHESTRATOR_IMAGE" 1
   if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
-    restart_worker_pods "$live_worker_replicas"
+    if [[ "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART" == "true" &&
+          "$live_worker_image" == "$WORKER_IMAGE" ]]; then
+      echo "worker image digest is unchanged; preserving active worker pods"
+    else
+      restart_worker_pods "$live_worker_replicas"
+    fi
     verify_worker_runtime_images "$live_worker_replicas"
   fi
 fi
