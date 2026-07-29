@@ -169,6 +169,13 @@ if [[ "$*" == *"-n symphony get pods -l app=symphony-worker -o json"* ]]; then
   exit 0
 fi
 
+if [[ "$*" == *"-n symphony exec deployment/symphony-orchestrator "* ]] &&
+    [[ "$*" == *".worker-affinities.json"* ]]; then
+  cat >> "$AFFINITY_LOG"
+  printf '\n' >> "$AFFINITY_LOG"
+  exit 0
+fi
+
 if [[ "$*" == *"-n symphony exec deployment/symphony-orchestrator "* ]]; then
   payload="$(cat)"
   printf '%s\n' "$payload" >> "$DRAIN_LOG"
@@ -311,6 +318,7 @@ export KUBECTL_LOG="$TEMP_DIR/kubectl.log"
 export DOCTL_LOG="$TEMP_DIR/doctl.log"
 export KUSTOMIZE_LOG="$TEMP_DIR/kustomize.log"
 export DRAIN_LOG="$TEMP_DIR/drain.log"
+export AFFINITY_LOG="$TEMP_DIR/affinity.log"
 export EVENT_LOG="$TEMP_DIR/event.log"
 export DRAIN_COUNT_FILE="$TEMP_DIR/drain-count"
 export SYMPHONY_WORKER_DRAIN_TOKEN="sentinel-drain-token-that-must-not-appear"
@@ -327,6 +335,7 @@ reset_logs() {
   : > "$DOCTL_LOG"
   : > "$KUSTOMIZE_LOG"
   : > "$DRAIN_LOG"
+  : > "$AFFINITY_LOG"
   : > "$EVENT_LOG"
   rm -f "$STATE_COUNT_FILE"
   rm -f "$DRAIN_COUNT_FILE"
@@ -363,6 +372,15 @@ run_deploy() {
     SYMPHONY_IDLE_POLL_SECONDS=0 \
     bash "$ROOT_DIR/scripts/deploy-digitalocean.sh"
 }
+
+reset_logs
+cat > "$TEMP_DIR/worker-affinity-seed.json" <<'EOF'
+{"version":1,"affinities":{"issue-1":"worker-1"}}
+EOF
+SYMPHONY_WORKER_AFFINITY_SEED_FILE="$TEMP_DIR/worker-affinity-seed.json" run_deploy
+jq -se 'length == 1 and .[0].affinities == {"issue-1":"worker-1"}' \
+  "$AFFINITY_LOG" >/dev/null
+grep -F ".worker-affinities.json" "$KUBECTL_LOG" >/dev/null
 
 reset_logs
 DOKS_CLUSTER=production-cluster \

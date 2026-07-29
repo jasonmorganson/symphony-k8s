@@ -296,6 +296,7 @@ mod tests {
                 drained_hosts: vec![],
                 available_hosts: vec![],
                 available_slots: 0,
+                required_hosts: vec![],
             },
             running: vec![],
             retrying: vec![],

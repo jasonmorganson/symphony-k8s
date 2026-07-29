@@ -24,6 +24,7 @@ pub struct AutoscalerConfig {
 pub struct ReconcilePlan {
     pub desired: u32,
     pub active_floor: u32,
+    pub required_host_floor: u32,
     pub drains: Vec<String>,
     pub scale_to: Option<u32>,
 }
@@ -139,6 +140,7 @@ pub fn reconcile_plan_with_floor(
     }
 
     let active_floor = active_floor(state, config)?;
+    let required_host_floor = required_host_floor(state, config)?;
     let desired = desired_workers(
         state.demand.eligible,
         config.agents_per_worker,
@@ -146,6 +148,7 @@ pub fn reconcile_plan_with_floor(
         config.maximum,
     )
     .max(active_floor)
+    .max(required_host_floor)
     .max(desired_floor.min(config.maximum));
 
     let active_limit = desired.min(current) as usize;
@@ -164,9 +167,35 @@ pub fn reconcile_plan_with_floor(
     Ok(ReconcilePlan {
         desired,
         active_floor,
+        required_host_floor,
         drains,
         scale_to,
     })
+}
+
+fn required_host_floor(state: &SymphonyState, config: &AutoscalerConfig) -> Result<u32, PlanError> {
+    let configured_hosts = state
+        .worker_pool
+        .configured_hosts
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+
+    state
+        .worker_pool
+        .required_hosts
+        .iter()
+        .try_fold(0, |floor, host| {
+            if !configured_hosts.contains(host.as_str()) {
+                return Err(PlanError::MalformedState);
+            }
+            let ordinal = host_ordinal(host, &config.statefulset)?;
+            let host_floor = ordinal.checked_add(1).ok_or(PlanError::MalformedState)?;
+            if host_floor > config.maximum {
+                return Err(PlanError::MalformedState);
+            }
+            Ok(floor.max(host_floor))
+        })
 }
 
 fn active_floor(state: &SymphonyState, config: &AutoscalerConfig) -> Result<u32, PlanError> {
@@ -236,6 +265,7 @@ mod tests {
                 drained_hosts: vec![],
                 available_hosts: vec![],
                 available_slots: 0,
+                required_hosts: vec![],
             },
             running: vec![],
             retrying: vec![],
@@ -315,7 +345,31 @@ mod tests {
         let ready = BTreeSet::new();
         let plan = reconcile_plan(&state, 8, &ready, Utc::now(), &config()).unwrap();
         assert_eq!(plan.active_floor, 8);
+        assert_eq!(plan.required_host_floor, 0);
         assert_eq!(plan.desired, 8);
+    }
+
+    #[test]
+    fn durable_affinity_high_ordinal_sets_a_safe_floor_without_a_running_session() {
+        let mut state = state(0);
+        state.worker_pool.required_hosts = vec!["symphony-worker-7.workers".into()];
+        let ready = BTreeSet::new();
+        let plan = reconcile_plan(&state, 2, &ready, Utc::now(), &config()).unwrap();
+        assert_eq!(plan.active_floor, 0);
+        assert_eq!(plan.required_host_floor, 8);
+        assert_eq!(plan.desired, 8);
+        assert_eq!(plan.scale_to, Some(8));
+    }
+
+    #[test]
+    fn unknown_required_host_is_rejected_instead_of_scaling_unsafely() {
+        let mut state = state(0);
+        state.worker_pool.required_hosts = vec!["symphony-worker-99.workers".into()];
+        let ready = BTreeSet::new();
+        assert_eq!(
+            reconcile_plan(&state, 2, &ready, Utc::now(), &config()),
+            Err(PlanError::MalformedState)
+        );
     }
 
     #[test]
