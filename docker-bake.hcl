@@ -20,6 +20,12 @@ target "release" {
   cache-from = ["type=gha,scope=symphony-release"]
 }
 
+target "control-plane-build" {
+  context    = "."
+  dockerfile = "docker/control-plane/Dockerfile"
+  cache-from = ["type=gha,scope=symphony-control-plane-build"]
+}
+
 target "orchestrator" {
   context    = "."
   dockerfile = "docker/orchestrator/Dockerfile"
@@ -38,10 +44,12 @@ target "worker" {
   context    = "."
   dockerfile = "docker/worker/Dockerfile"
   contexts = {
-    runtime-base = "target:runtime-base"
+    runtime-base        = "target:runtime-base"
+    control-plane-build = "target:control-plane-build"
   }
   args = {
-    RUNTIME_BASE = "runtime-base"
+    RUNTIME_BASE        = "runtime-base"
+    CONTROL_PLANE_BUILD = "control-plane-build"
   }
   cache-from = ["type=gha,scope=symphony-worker"]
 }
@@ -49,5 +57,11 @@ target "worker" {
 target "autoscaler" {
   context    = "."
   dockerfile = "docker/autoscaler/Dockerfile"
+  contexts = {
+    control-plane-build = "target:control-plane-build"
+  }
+  args = {
+    CONTROL_PLANE_BUILD = "control-plane-build"
+  }
   cache-from = ["type=gha,scope=symphony-autoscaler"]
 }

@@ -32,7 +32,7 @@ assert_flags "$all_true" unknown/new-shared-input
 
 assert_flags \
   "orchestrator=false worker=true autoscaler=true" \
-  Cargo.lock rust/src/autoscaling.rs
+  Cargo.lock rust/src/autoscaling.rs docker/control-plane/Dockerfile
 assert_flags \
   "orchestrator=true worker=true autoscaler=false" \
   docker/runtime-base/Dockerfile docker/common/runtime-common.sh

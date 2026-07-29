@@ -313,6 +313,7 @@ jobs:
             runtime-base.cache-to=type=gha,mode=max,scope=symphony-runtime-base
             release.tags=symphony-release:do
             release.cache-to=type=gha,mode=max,scope=symphony-release
+            control-plane-build.cache-to=type=gha,mode=max,scope=symphony-control-plane-build
             orchestrator.tags=ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${{ github.sha }}
             orchestrator.cache-to=type=gha,mode=max,scope=symphony-orchestrator
             worker.tags=ghcr.io/jasonmorganson/symphony-k8s-worker:${{ github.sha }}
