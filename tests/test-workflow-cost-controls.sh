@@ -43,6 +43,15 @@ grep -q 'does not alter upstream' "$throughput_overlay"
 grep -q '^# Consolidated review for mechanical main-CI repairs$' "$throughput_overlay"
 grep -q 'one consolidated required review panel' "$throughput_overlay"
 grep -q 'authoritative final gate on the final tree' "$throughput_overlay"
+grep -q '^# Durable review proof across session boundaries$' "$throughput_overlay"
+grep -q 'completed Review Batch remains valid across a continuation' \
+  "$throughput_overlay"
+grep -q 'do not launch another panel solely because the session' \
+  "$throughput_overlay"
+grep -q '^# Bound work when the reported failure does not reproduce$' \
+  "$throughput_overlay"
+grep -q 'make an explicit scope decision' "$throughput_overlay"
+grep -q 'new repository-wide enforcement framework' "$throughput_overlay"
 grep -q '^# Dependency-upgrade scope budget$' "$throughput_overlay"
 grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_overlay"
 grep -q "ticket's bounded exception" "$throughput_overlay"

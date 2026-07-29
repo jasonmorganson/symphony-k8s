@@ -22,6 +22,38 @@ If any commit introduces substantive runtime behavior, a security or data bounda
 migration, or an independently reviewable deployment change, use the canonical review behavior
 for that change instead of classifying it as mechanical.
 
+# Durable review proof across session boundaries
+
+A completed Review Batch remains valid across a continuation, retry, max-turn restart, or worker
+change only when the durable workpad records the completed batch, its required review coverage,
+all findings and dispositions, the exact comparison base, and an exact content fingerprint of the
+reviewed code-bearing tree. The fingerprint must include committed, staged, unstaged, untracked,
+generated, and lockfile content. On resume, verify that the recorded comparison base, tree
+fingerprint, and required review scope still match. When they match and no finding remains
+unresolved, reuse that exact Review Batch; do not launch another panel solely because the session
+boundary changed.
+
+Fail closed and run the canonical required review again when the evidence or fingerprint is
+missing or ambiguous, the comparison base or acceptance or review scope changed, a finding is
+unresolved or newly applicable, or any code-bearing content changed after review. Workpad, logs,
+comments, and other evidence-only updates do not invalidate an otherwise exact match. Reusing a
+Review Batch never satisfies or replaces the primary agent's authoritative final gate, required
+CI, deployment checks, or fresh remote proof.
+
+# Bound work when the reported failure does not reproduce
+
+When the issue's exact pinned reproduction succeeds or the reported failure otherwise does not
+reproduce, record the exact command, revision, environment, and result in the durable workpad
+before changing code. Then make an explicit scope decision: either complete the issue with
+evidence when its acceptance criteria are already satisfied, or implement the smallest
+deterministic regression or correction still required by those criteria.
+
+Do not turn a stale or non-reproducing report into a new repository-wide enforcement framework,
+generator, or policy unless an acceptance criterion requires that wider surface or the narrow
+path is proven insufficient. Record that proof and the bounded expansion before implementation.
+Failure to reproduce does not waive any remaining acceptance criterion, required review, final
+gate, CI, deployment check, or workflow-owned transition.
+
 # Dependency-upgrade scope budget
 
 Before a dependency upgrade expands into replacing a provider-facing development tool, record an
