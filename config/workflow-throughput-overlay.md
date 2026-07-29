@@ -38,11 +38,11 @@ credential-isolation, and final-gate requirements. Maintenance that changes the 
 must report the new head and current approval/evidence truth without claiming that an approval for
 an older head remains current.
 
-After the bounded maintenance is complete, or when no listed readiness defect is actionable, leave
-the issue in `Human Review` and call `symphony_report_turn_outcome` with outcome `defer` as the final
-tool action. State in the reason whether maintenance completed or current external/human evidence is
-unchanged. This hint schedules only a bounded authoritative tracker recheck; it never represents
-approval or a tracker transition.
+After the bounded maintenance is complete, or when no listed readiness defect is actionable,
+leave the issue in `Human Review` and call `symphony_report_turn_outcome` with outcome `defer` as the final
+tool action. State in the reason whether maintenance completed or current external/human
+evidence is unchanged. This hint schedules only a bounded authoritative tracker recheck; it never
+represents approval or a tracker transition.
 
 # Consolidated review for mechanical main-CI repairs
 
