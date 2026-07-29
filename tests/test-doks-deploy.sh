@@ -408,7 +408,7 @@ scale_down_ready_line="$(grep -nF \
   'kubectl:-n symphony rollout status deployment/symphony-autoscaler --timeout=5m' \
   "$EVENT_LOG" | head -1 | cut -d: -f1)"
 second_drain_line="$(grep -nF 'drain:["worker-0","worker-1"]' \
-  "$EVENT_LOG" | tail -1 | cut -d: -f1)"
+  "$EVENT_LOG" | sed -n '2p' | cut -d: -f1)"
 post_quiesce_idle_poll_line="$(grep -nF 'kubectl:get --raw ' "$EVENT_LOG" |
   tail -1 | cut -d: -f1)"
 apply_event_line="$(grep -nF 'kubectl:apply -f ' "$EVENT_LOG" |
