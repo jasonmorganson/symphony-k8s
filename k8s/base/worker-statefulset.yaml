@@ -139,6 +139,12 @@ spec:
                   name: github-machine-arrusted-symphony
                   key: token
                   optional: false
+            - name: VERCEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vercel-autographing
+                  key: VERCEL_TOKEN
+                  optional: false
           securityContext:
             allowPrivilegeEscalation: false
           volumeMounts:
