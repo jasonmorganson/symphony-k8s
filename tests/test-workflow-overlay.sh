@@ -64,6 +64,15 @@ grep -Fq 'new repository-wide enforcement framework' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Failure to reproduce does not waive any remaining acceptance criterion' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Freeze a published head while its evidence is pending' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'keep the code-bearing tree fixed' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not add speculative cleanup, helper extraction, extra tests' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'only in response to a concrete classified check failure' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'produce one bounded remediation batch' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'explicit scope-budget decision in the durable workpad' \
   "$TEMP_DIR/throughput-rendered.md"
@@ -99,6 +108,8 @@ grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
 grep -Fqx '# Durable review proof across session boundaries' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Bound work when the reported failure does not reproduce' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Freeze a published head while its evidence is pending' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/runtime-workflow.md"

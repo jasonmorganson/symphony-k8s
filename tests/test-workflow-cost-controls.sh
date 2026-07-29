@@ -52,6 +52,11 @@ grep -q '^# Bound work when the reported failure does not reproduce$' \
   "$throughput_overlay"
 grep -q 'make an explicit scope decision' "$throughput_overlay"
 grep -q 'new repository-wide enforcement framework' "$throughput_overlay"
+grep -q '^# Freeze a published head while its evidence is pending$' \
+  "$throughput_overlay"
+grep -q 'keep the code-bearing tree fixed' "$throughput_overlay"
+grep -q 'only in response to a concrete classified check failure' \
+  "$throughput_overlay"
 grep -q '^# Dependency-upgrade scope budget$' "$throughput_overlay"
 grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_overlay"
 grep -q "ticket's bounded exception" "$throughput_overlay"

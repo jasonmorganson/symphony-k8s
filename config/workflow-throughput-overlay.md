@@ -54,6 +54,21 @@ path is proven insufficient. Record that proof and the bounded expansion before 
 Failure to reproduce does not waive any remaining acceptance criterion, required review, final
 gate, CI, deployment check, or workflow-owned transition.
 
+# Freeze a published head while its evidence is pending
+
+After the accepted implementation is committed and pushed and exact-head checks or review are in
+progress, keep the code-bearing tree fixed. Observe and classify the published evidence before
+editing again. Do not add speculative cleanup, helper extraction, extra tests, generated changes,
+or other unrequested remediation merely because the issue remains active or a new Symphony turn
+begins.
+
+Change the published tree only in response to a concrete classified check failure, review finding,
+newly discovered acceptance gap, stale-base repair, or other recorded evidence that the current
+head cannot satisfy the issue. Record that trigger and its mapping before editing, then
+produce one bounded remediation batch and rerun the review and gates invalidated by that batch.
+This freeze does not prevent required feedback fixes, current-main synchronization, or
+workflow-owned transitions.
+
 # Dependency-upgrade scope budget
 
 Before a dependency upgrade expands into replacing a provider-facing development tool, record an
