@@ -69,6 +69,19 @@ produce one bounded remediation batch and rerun the review and gates invalidated
 This freeze does not prevent required feedback fixes, current-main synchronization, or
 workflow-owned transitions.
 
+# Do not wait for a CI job that is not part of the current gate
+
+Before waiting for a named pull-request job, inspect the checked workflow, its change classifier,
+the repository ruleset, and the issue's acceptance criteria. If that job is intentionally not
+scheduled for the pull request and the acceptance criteria assign its authoritative proof to a
+post-merge or containing-main run, record the absent PR job and proceed once every actual
+pre-merge gate is satisfied. Do not retry, edit code, or hold a review-ready issue for a job that
+the repository will not create.
+
+Fail closed when a ruleset-required or acceptance-required pre-merge job is unexpectedly absent,
+skipped, stale, or ambiguous. This rule only distinguishes the designed proof stage; it never
+waives the required containing-main, deployment, or other later evidence.
+
 # Dependency-upgrade scope budget
 
 Before a dependency upgrade expands into replacing a provider-facing development tool, record an

@@ -73,6 +73,16 @@ grep -Fq 'only in response to a concrete classified check failure' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'produce one bounded remediation batch' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Do not wait for a CI job that is not part of the current gate' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'inspect the checked workflow, its change classifier' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'acceptance criteria assign its authoritative proof' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not retry, edit code, or hold a review-ready issue' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Fail closed when a ruleset-required or acceptance-required pre-merge job' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'explicit scope-budget decision in the durable workpad' \
   "$TEMP_DIR/throughput-rendered.md"
@@ -110,6 +120,8 @@ grep -Fqx '# Durable review proof across session boundaries' \
 grep -Fqx '# Bound work when the reported failure does not reproduce' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Freeze a published head while its evidence is pending' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Do not wait for a CI job that is not part of the current gate' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/runtime-workflow.md"

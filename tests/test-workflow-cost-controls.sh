@@ -57,6 +57,12 @@ grep -q '^# Freeze a published head while its evidence is pending$' \
 grep -q 'keep the code-bearing tree fixed' "$throughput_overlay"
 grep -q 'only in response to a concrete classified check failure' \
   "$throughput_overlay"
+grep -q '^# Do not wait for a CI job that is not part of the current gate$' \
+  "$throughput_overlay"
+grep -q 'acceptance criteria assign its authoritative proof' \
+  "$throughput_overlay"
+grep -q 'Fail closed when a ruleset-required or acceptance-required pre-merge job' \
+  "$throughput_overlay"
 grep -q '^# Dependency-upgrade scope budget$' "$throughput_overlay"
 grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_overlay"
 grep -q "ticket's bounded exception" "$throughput_overlay"
