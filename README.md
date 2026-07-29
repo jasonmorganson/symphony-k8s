@@ -356,14 +356,17 @@ the short live A-142 debugging segment it showed no benefit and coincided with
 a higher observed input-token slope while adding compaction work. The workflow
 uses the model default.
 
-Current-session state, eligible demand, and worker-pool capacity are available
-from Symphony's state API. Autoscaler health and capacity measurements are
-available from its metrics endpoint:
+Current-session state, eligible demand, read-only observed issue dwell, and
+worker-pool capacity are available from Symphony's state API. `Human Review`
+is fetched in the same paced tracker request as active work, but remains
+excluded from demand and dispatch. Each observed entry includes its identifier,
+state, `updated_at`, and current `age_seconds`. Autoscaler health and capacity
+measurements are available from its metrics endpoint:
 
 ```bash
 kubectl -n symphony port-forward svc/symphony-orchestrator 4000:4000
 curl -fsS http://127.0.0.1:4000/api/v1/state | jq \
-  '{demand, worker_pool, running, retrying, codex_totals}'
+  '{demand, observed, worker_pool, running, retrying, codex_totals}'
 kubectl -n symphony port-forward svc/symphony-autoscaler 8080:8080
 curl -fsS http://127.0.0.1:8080/metrics
 ```
