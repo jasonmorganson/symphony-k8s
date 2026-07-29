@@ -46,7 +46,10 @@ assert_auth_result "Not logged in" failure
 OPENAI_API_KEY=sk-test assert_auth_result "Logged in using an API key - sk-***" failure
 assert_required_commands
 assert_required_commands gh
+assert_required_commands jq
 assert_required_commands timeout
+assert_required_commands unzip
+assert_required_commands zip
 
 assert_session_result() {
   local mode="$1" expected="$2" output rc=0
@@ -269,7 +272,13 @@ if grep -A8 'readinessProbe:' "${worker_manifests[0]}" | grep -q 'codex login st
 fi
 
 grep -q '^    gh \\' "$ROOT_DIR/docker/worker/Dockerfile"
+grep -q '^    jq \\' "$ROOT_DIR/docker/worker/Dockerfile"
+grep -q '^    unzip \\' "$ROOT_DIR/docker/worker/Dockerfile"
+grep -q '^    zip \\' "$ROOT_DIR/docker/worker/Dockerfile"
 grep -q 'gh --version' "$ROOT_DIR/docker/worker/Dockerfile"
+grep -q 'jq --version' "$ROOT_DIR/docker/worker/Dockerfile"
+grep -q 'unzip -v' "$ROOT_DIR/docker/worker/Dockerfile"
+grep -q 'zip --version' "$ROOT_DIR/docker/worker/Dockerfile"
 grep -q 'configure_github_auth' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'gh auth login --hostname github.com --git-protocol https --with-token' \
   "$ROOT_DIR/docker/worker/entrypoint.sh"

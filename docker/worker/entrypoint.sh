@@ -19,7 +19,7 @@ trim_secret() {
 
 verify_required_commands() {
   local command_name
-  for command_name in bash codex curl gh git mise sshd timeout; do
+  for command_name in bash codex curl gh git jq mise sshd timeout unzip zip; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
       echo "required worker command is unavailable: $command_name" >&2
       return 1

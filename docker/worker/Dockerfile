@@ -14,7 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     libssl-dev \
+    zip \
+    unzip \
+    jq \
     && gh --version \
+    && zip --version \
+    && unzip -v \
+    && jq --version \
     && rm -rf /var/lib/apt/lists/*
 
 ARG MISE_VERSION=2026.7.5

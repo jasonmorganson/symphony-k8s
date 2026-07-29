@@ -40,6 +40,14 @@ fi
 grep -q '^# DOKS Linear-read guard$' "$throughput_overlay"
 grep -q 'finite page size of at most 25' "$throughput_overlay"
 grep -q 'does not alter upstream' "$throughput_overlay"
+grep -q '^# Consolidated review for mechanical main-CI repairs$' "$throughput_overlay"
+grep -q 'one consolidated required review panel' "$throughput_overlay"
+grep -q 'authoritative final gate on the final tree' "$throughput_overlay"
+grep -q '^# Dependency-upgrade scope budget$' "$throughput_overlay"
+grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_overlay"
+grep -q "ticket's bounded exception" "$throughput_overlay"
+grep -q 'Do not silently turn a package update into a provider-tool migration' \
+  "$throughput_overlay"
 if grep -q 'symphony_merge_writer\\|action.*acquire\\|action.*yield' "$throughput_overlay"; then
   echo "workflow overlay must not install custom merge serialization" >&2
   exit 1

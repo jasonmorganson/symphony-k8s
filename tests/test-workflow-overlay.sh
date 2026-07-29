@@ -39,7 +39,17 @@ grep -Fqx '# DOKS Linear-read guard' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'finite page size of at most 25' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'This read guard does not alter upstream' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'dispatch, review, Merging, landing, or Linear-transition behavior.' \
+grep -Fq 'dispatch, Merging, landing, or Linear-transition behavior.' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'one consolidated required review panel' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'authoritative final gate on the final tree' "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'explicit scope-budget decision in the durable workpad' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq "ticket's bounded exception" "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not silently turn a package update into a provider-tool migration' \
   "$TEMP_DIR/throughput-rendered.md"
 if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
     "$TEMP_DIR/throughput-rendered.md"; then
