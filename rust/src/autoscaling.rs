@@ -1,4 +1,7 @@
-use std::collections::BTreeSet;
+use std::{
+    collections::{BTreeSet, VecDeque},
+    time::Duration,
+};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -23,6 +26,55 @@ pub struct ReconcilePlan {
     pub active_floor: u32,
     pub drains: Vec<String>,
     pub scale_to: Option<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DownscaleStabilizer {
+    window: Duration,
+    recommendations: VecDeque<(DateTime<Utc>, u32)>,
+    initialized: bool,
+}
+
+impl DownscaleStabilizer {
+    pub fn new(window: Duration) -> Self {
+        Self {
+            window,
+            recommendations: VecDeque::new(),
+            initialized: false,
+        }
+    }
+
+    pub fn stabilize(&mut self, desired: u32, current: u32, now: DateTime<Utc>) -> u32 {
+        if self.window.is_zero() {
+            return desired;
+        }
+
+        while self.recommendations.front().is_some_and(|(seen_at, _)| {
+            now.signed_duration_since(*seen_at)
+                .to_std()
+                .map_or(true, |age| age > self.window)
+        }) {
+            self.recommendations.pop_front();
+        }
+
+        if !self.initialized {
+            self.recommendations.push_back((now, current));
+            self.initialized = true;
+        }
+        self.recommendations.push_back((now, desired));
+
+        if desired >= current {
+            return desired;
+        }
+
+        self.recommendations
+            .iter()
+            .map(|(_, recommendation)| *recommendation)
+            .max()
+            .unwrap_or(desired)
+            .max(desired)
+            .min(current)
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -54,6 +106,17 @@ pub fn reconcile_plan(
     now: DateTime<Utc>,
     config: &AutoscalerConfig,
 ) -> Result<ReconcilePlan, PlanError> {
+    reconcile_plan_with_floor(state, current, ready_hosts, now, config, 0)
+}
+
+pub fn reconcile_plan_with_floor(
+    state: &SymphonyState,
+    current: u32,
+    ready_hosts: &BTreeSet<String>,
+    now: DateTime<Utc>,
+    config: &AutoscalerConfig,
+    desired_floor: u32,
+) -> Result<ReconcilePlan, PlanError> {
     let observed_at = state
         .demand
         .observed_at
@@ -82,7 +145,8 @@ pub fn reconcile_plan(
         config.minimum,
         config.maximum,
     )
-    .max(active_floor);
+    .max(active_floor)
+    .max(desired_floor.min(config.maximum));
 
     let active_limit = desired.min(current) as usize;
     let drains = state
@@ -250,6 +314,68 @@ mod tests {
         });
         let ready = BTreeSet::new();
         let plan = reconcile_plan(&state, 8, &ready, Utc::now(), &config()).unwrap();
+        assert_eq!(plan.active_floor, 8);
+        assert_eq!(plan.desired, 8);
+    }
+
+    #[test]
+    fn downscale_stabilization_holds_recent_capacity_then_expires() {
+        let now = Utc::now();
+        let mut stabilizer = DownscaleStabilizer::new(Duration::from_secs(90));
+
+        assert_eq!(stabilizer.stabilize(4, 3, now), 4);
+        assert_eq!(stabilizer.stabilize(3, 4, now + TimeDelta::seconds(59)), 4);
+        assert_eq!(stabilizer.stabilize(3, 4, now + TimeDelta::seconds(91)), 3);
+    }
+
+    #[test]
+    fn downscale_stabilization_never_delays_scale_up() {
+        let now = Utc::now();
+        let mut stabilizer = DownscaleStabilizer::new(Duration::from_secs(90));
+
+        assert_eq!(stabilizer.stabilize(3, 4, now), 4);
+        assert_eq!(stabilizer.stabilize(5, 4, now + TimeDelta::seconds(15)), 5);
+    }
+
+    #[test]
+    fn downscale_stabilization_never_scales_up_from_history() {
+        let now = Utc::now();
+        let mut stabilizer = DownscaleStabilizer::new(Duration::from_secs(90));
+
+        assert_eq!(stabilizer.stabilize(6, 6, now), 6);
+        assert_eq!(stabilizer.stabilize(3, 4, now + TimeDelta::seconds(15)), 4);
+    }
+
+    #[test]
+    fn downscale_stabilization_seeds_current_capacity() {
+        let now = Utc::now();
+        let mut stabilizer = DownscaleStabilizer::new(Duration::from_secs(90));
+
+        assert_eq!(stabilizer.stabilize(3, 4, now), 4);
+        assert_eq!(stabilizer.stabilize(3, 4, now + TimeDelta::seconds(91)), 3);
+    }
+
+    #[test]
+    fn stabilized_floor_regenerates_drains_for_held_capacity() {
+        let now = Utc::now();
+        let ready = (0..4).map(|i| format!("symphony-worker-{i}")).collect();
+        let plan = reconcile_plan_with_floor(&state(3), 4, &ready, now, &config(), 4).unwrap();
+
+        assert_eq!(plan.desired, 4);
+        assert_eq!(plan.scale_to, None);
+        assert_eq!(plan.drains.first().unwrap(), "symphony-worker-4.workers");
+    }
+
+    #[test]
+    fn stabilized_floor_never_weakens_active_ordinal_floor() {
+        let mut state = state(0);
+        state.running.push(crate::symphony::SessionEntry {
+            issue_identifier: Some("A-1".into()),
+            worker_host: Some("symphony-worker-7.workers".into()),
+        });
+        let plan = reconcile_plan_with_floor(&state, 8, &BTreeSet::new(), Utc::now(), &config(), 3)
+            .unwrap();
+
         assert_eq!(plan.active_floor, 8);
         assert_eq!(plan.desired, 8);
     }

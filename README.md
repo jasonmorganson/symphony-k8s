@@ -204,10 +204,13 @@ normal poll. Desired replicas are
 
 Scale-up keeps new ordinals drained, increases StatefulSet replicas, and
 watches worker pods with kube-rs. Ready workers are undrained on the next
-idempotent reconciliation. Scale-down drains the highest idle ordinals,
-requires Symphony to acknowledge that those workers host no active session,
-and only then reduces replicas. Any worker hosting a running session sets a
-hard capacity floor.
+idempotent reconciliation. Scale-up is immediate, while scale-down uses the
+maximum validated desired capacity observed during the preceding 90 seconds.
+The controller seeds that window with current capacity after restart and never
+uses historical demand to scale above current capacity. Once the window
+expires, scale-down drains the highest idle ordinals, requires Symphony to
+acknowledge that those workers host no active session, and only then reduces
+replicas. Any worker hosting a running session sets a hard capacity floor.
 
 Stale or malformed Symphony state, an inexact drain acknowledgement, a failed
 Kubernetes watch/relist, or any API error prohibits scale-down and retains
