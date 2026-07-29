@@ -7,6 +7,7 @@ WORKDIR /app
 COPY --from=release /release/ /app/
 COPY docker/orchestrator/entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 COPY docker/orchestrator/materialize-runtime-workflow.sh /usr/local/bin/materialize-runtime-workflow.sh
+COPY config/workflow-runtime.yaml /app/config/workflow-runtime.yaml
 COPY config/workflow-throughput-overlay.md /app/config/workflow-throughput-overlay.md
 RUN if [ -x /app/bin/symphony_elixir ] && [ ! -e /app/bin/symphony ]; then \
       ln -s /app/bin/symphony_elixir /app/bin/symphony; \
