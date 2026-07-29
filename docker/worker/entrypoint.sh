@@ -199,7 +199,7 @@ verify_sshd_git_identity
 ensure_codex_chatgpt_session
 
 mkdir -p "$SYMPHONY_WORKSPACE_ROOT" "$SYMPHONY_HOME/.ssh" /run/sshd
-chown -R symphony:symphony "$SYMPHONY_WORKSPACE_ROOT"
+chown symphony:symphony "$SYMPHONY_WORKSPACE_ROOT"
 chmod 0777 "$SYMPHONY_WORKSPACE_ROOT"
 chown symphony:symphony "$SYMPHONY_HOME" "$SYMPHONY_HOME/.ssh"
 install_workspace_branch_guards
