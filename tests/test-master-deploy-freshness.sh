@@ -78,7 +78,7 @@ deploy_line="$(grep -n 'name: Deploy immutable images to DOKS' "$workflow" | cut
 [[ -n "$guard_line" && -n "$deploy_line" && "$guard_line" -lt "$deploy_line" ]]
 grep -A3 'name: Verify deployment revision is current master' "$workflow" |
   grep -Fq "GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}"
-grep -A2 'group: production-doks' "$workflow" |
+grep -A1 "'production-doks'" "$workflow" |
   grep -q 'cancel-in-progress: false'
 
 echo "master deployment freshness tests passed"
