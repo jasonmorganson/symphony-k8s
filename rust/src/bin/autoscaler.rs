@@ -27,7 +27,9 @@ use prometheus_client::{
     registry::Registry,
 };
 use symphony_control_plane::{
-    autoscaling::{AutoscalerConfig, reconcile_plan},
+    autoscaling::{
+        AutoscalerConfig, DownscaleStabilizer, reconcile_plan, reconcile_plan_with_floor,
+    },
     env::{i64 as env_i64, string as env_string, u32 as env_u32, u64 as env_u64},
     kubernetes::{current_replicas, pod_ready, set_replicas},
     symphony::SymphonyClient,
@@ -47,6 +49,7 @@ struct Settings {
     namespace: String,
     pod_selector: String,
     poll_interval: Duration,
+    downscale_stabilization: Duration,
     bind: SocketAddr,
     autoscaler: AutoscalerConfig,
     symphony: SymphonyClient,
@@ -124,6 +127,7 @@ async fn main() -> Result<()> {
         .init();
 
     let settings = Settings::from_env()?;
+    let mut downscale_stabilizer = DownscaleStabilizer::new(settings.downscale_stabilization);
     let client = Client::try_default()
         .await
         .context("load in-cluster Kubernetes configuration")?;
@@ -163,7 +167,15 @@ async fn main() -> Result<()> {
         let ready_snapshot = ready_hosts.read().await.clone();
         metrics.ready_workers.set(as_i64(ready_snapshot.len()));
 
-        match reconcile(&settings, &statefulsets, &ready_snapshot, &metrics).await {
+        match reconcile(
+            &settings,
+            &statefulsets,
+            &ready_snapshot,
+            &metrics,
+            &mut downscale_stabilizer,
+        )
+        .await
+        {
             Ok(()) => {
                 reconcile_ready.store(true, Ordering::Release);
                 metrics.reconciliations.inc();
@@ -200,6 +212,10 @@ impl Settings {
             namespace,
             pod_selector: env_string("WORKER_POD_SELECTOR", "app=symphony-worker"),
             poll_interval: Duration::from_secs(env_u64("POLL_INTERVAL_SECONDS", 15)?),
+            downscale_stabilization: Duration::from_secs(env_u64(
+                "SCALE_DOWN_STABILIZATION_SECONDS",
+                90,
+            )?),
             bind: env_string("METRICS_BIND", "0.0.0.0:8080")
                 .parse()
                 .context("invalid METRICS_BIND")?,
@@ -230,6 +246,7 @@ async fn reconcile(
     statefulsets: &Api<StatefulSet>,
     ready_hosts: &BTreeSet<String>,
     metrics: &Metrics,
+    downscale_stabilizer: &mut DownscaleStabilizer,
 ) -> Result<()> {
     let (state, current) = tokio::try_join!(
         async {
@@ -245,13 +262,28 @@ async fn reconcile(
                 .context("read worker StatefulSet replicas")
         }
     )?;
-    let plan = reconcile_plan(
-        &state,
-        current,
-        ready_hosts,
-        Utc::now(),
-        &settings.autoscaler,
-    )?;
+    let now = Utc::now();
+    let raw_plan = reconcile_plan(&state, current, ready_hosts, now, &settings.autoscaler)?;
+    let effective_desired = downscale_stabilizer.stabilize(raw_plan.desired, current, now);
+    let plan = if effective_desired == raw_plan.desired {
+        raw_plan
+    } else {
+        info!(
+            current,
+            raw_desired = raw_plan.desired,
+            desired = effective_desired,
+            stabilization_seconds = settings.downscale_stabilization.as_secs(),
+            "worker scale-down held by recent demand"
+        );
+        reconcile_plan_with_floor(
+            &state,
+            current,
+            ready_hosts,
+            now,
+            &settings.autoscaler,
+            effective_desired,
+        )?
+    };
 
     metrics.current_workers.set(i64::from(current));
     metrics.desired_workers.set(i64::from(plan.desired));

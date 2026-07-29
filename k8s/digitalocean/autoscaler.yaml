@@ -86,6 +86,8 @@ spec:
               value: "1"
             - name: POLL_INTERVAL_SECONDS
               value: "15"
+            - name: SCALE_DOWN_STABILIZATION_SECONDS
+              value: "90"
             - name: DEMAND_MAX_AGE_SECONDS
               value: "300"
           ports:

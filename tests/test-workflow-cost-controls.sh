@@ -64,6 +64,7 @@ fi
 grep -A1 'name: MIN_WORKERS' "$autoscaler" | grep -q 'value: "0"'
 grep -A1 'name: MAX_WORKERS' "$autoscaler" | grep -q 'value: "10"'
 grep -A1 'name: POLL_INTERVAL_SECONDS' "$autoscaler" | grep -q 'value: "15"'
+grep -A1 'name: SCALE_DOWN_STABILIZATION_SECONDS' "$autoscaler" | grep -q 'value: "90"'
 grep -A1 'name: DEMAND_MAX_AGE_SECONDS' "$autoscaler" | grep -q 'value: "300"'
 grep -q 'path: /readyz' "$autoscaler"
 grep -q 'path: /healthz' "$autoscaler"
