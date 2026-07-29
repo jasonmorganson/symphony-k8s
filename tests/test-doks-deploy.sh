@@ -451,6 +451,23 @@ WORKER_REPLICAS=7 run_deploy
 grep -F "build worker_replicas=7" "$KUSTOMIZE_LOG"
 
 reset_logs
+preserved_worker_image="ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+WORKER_DEPLOYED_IMAGE="$preserved_worker_image" \
+  SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
+if grep -F -- "-n symphony delete pod/symphony-worker-" "$KUBECTL_LOG"; then
+  echo "unchanged worker image must preserve active worker pods" >&2
+  exit 1
+fi
+grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$preserved_worker_image" \
+  "$KUSTOMIZE_LOG"
+if grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$WORKER_IMAGE" \
+    "$KUSTOMIZE_LOG"; then
+  echo "unchanged worker inputs must reuse the live immutable image" >&2
+  exit 1
+fi
+grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+
+reset_logs
 DOKS_REFRESH_KUBECONFIG=true run_deploy
 grep -F "kubernetes cluster kubeconfig save --expiry-seconds 600 symphony-k8s" "$DOCTL_LOG"
 [[ "$(grep -Fc "kubernetes cluster kubeconfig save --expiry-seconds 600 symphony-k8s" "$DOCTL_LOG")" -ge 7 ]]
@@ -632,6 +649,13 @@ fi
 reset_logs
 if SYMPHONY_WORKER_VOLUME_SIZE=50G run_deploy; then
   echo "invalid worker volume size must fail deployment" >&2
+  exit 1
+fi
+[[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" ]]
+
+reset_logs
+if SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=maybe run_deploy; then
+  echo "invalid unchanged-worker restart policy must fail deployment" >&2
   exit 1
 fi
 [[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" ]]

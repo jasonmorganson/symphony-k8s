@@ -156,6 +156,37 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Classify worker rollout
+        id: worker-rollout
+        shell: bash
+        run: |
+          set -euo pipefail
+          skip_restart=false
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]] &&
+              git rev-parse --verify "${GITHUB_SHA}^" >/dev/null 2>&1; then
+            mapfile -t changed_paths < <(
+              git diff --name-only "${GITHUB_SHA}^" "${GITHUB_SHA}"
+            )
+            if (( ${#changed_paths[@]} > 0 )); then
+              skip_restart=true
+              for path in "${changed_paths[@]}"; do
+                case "$path" in
+                  config/workflow-throughput-overlay.md | \
+                  tests/test-workflow-overlay.sh | \
+                  scripts/render-workflow.sh | \
+                  docker/orchestrator/*)
+                    ;;
+                  *)
+                    skip_restart=false
+                    break
+                    ;;
+                esac
+              done
+            fi
+          fi
+          echo "skip_restart=$skip_restart" >> "$GITHUB_OUTPUT"
       - name: Install doctl
         uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
@@ -174,6 +205,7 @@ jobs:
           SYMPHONY_WAIT_FOR_IDLE: "false"
           SYMPHONY_IDLE_TIMEOUT_SECONDS: "14400"
           SYMPHONY_IDLE_POLL_SECONDS: "30"
+          SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART: ${{ steps.worker-rollout.outputs.skip_restart }}
         run: bash scripts/deploy-digitalocean.sh
       - name: Record deployment
         env:
