@@ -73,7 +73,7 @@ spec:
             - "--i-understand-that-this-will-be-running-without-the-usual-guardrails"
             - "--port"
             - "4001"
-            - "/etc/symphony-workflow/WORKFLOW.md"
+            - "/tmp/symphony-workflow/WORKFLOW.md"
           ports:
             - name: http
               containerPort: 4000

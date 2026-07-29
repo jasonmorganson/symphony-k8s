@@ -28,4 +28,10 @@ if ! codex login status >/dev/null 2>&1; then
   fi
 fi
 
+workflow_source="/etc/symphony-workflow/WORKFLOW.md"
+workflow_overlay="/app/config/workflow-throughput-overlay.md"
+workflow_runtime="/tmp/symphony-workflow/WORKFLOW.md"
+materialize-runtime-workflow.sh \
+  "$workflow_source" "$workflow_overlay" "$workflow_runtime"
+
 exec /app/bin/symphony "$@"
