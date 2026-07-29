@@ -33,8 +33,147 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('publish-images-pr-{0}', github.event.pull_request.number) || 'production-doks' }}
+  cancel-in-progress: false
+
 jobs:
+  deployment-plan:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    environment:
+      name: production
+      url: https://symphony.morganson.me
+    outputs:
+      reuse_available: ${{ steps.live.outputs.reuse_available }}
+      source_revision: ${{ steps.live.outputs.source_revision }}
+      orchestrator_image: ${{ steps.live.outputs.orchestrator_image }}
+      worker_image: ${{ steps.live.outputs.worker_image }}
+      autoscaler_image: ${{ steps.live.outputs.autoscaler_image }}
+    steps:
+      - uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Read exact live deployment state
+        id: live
+        shell: bash
+        run: |
+          set -euo pipefail
+          doctl kubernetes cluster kubeconfig save \
+            --expiry-seconds 600 symphony-k8s >/dev/null
+          if [[ -z "$(kubectl get namespace symphony \
+            --ignore-not-found -o name)" ]]; then
+            echo "Symphony runtime namespace is absent; automatic bootstrap requires operator-provided runtime inputs" >&2
+            exit 1
+          fi
+          resources=(
+            deployment/symphony-orchestrator
+            statefulset/symphony-worker
+            deployment/symphony-autoscaler
+          )
+          present=0
+          for resource in "${resources[@]}"; do
+            if [[ -n "$(kubectl -n symphony get "$resource" \
+              --ignore-not-found -o name)" ]]; then
+              present=$((present + 1))
+            fi
+          done
+          if (( present != ${#resources[@]} )); then
+            echo "Symphony runtime is partial; refusing automatic deployment planning" >&2
+            exit 1
+          fi
+
+          orchestrator_source="$(kubectl -n symphony get \
+            deployment/symphony-orchestrator \
+            -o jsonpath='{.metadata.annotations.symphony\.morganson\.me/source-revision}')"
+          worker_source="$(kubectl -n symphony get \
+            statefulset/symphony-worker \
+            -o jsonpath='{.metadata.annotations.symphony\.morganson\.me/source-revision}')"
+          autoscaler_source="$(kubectl -n symphony get \
+            deployment/symphony-autoscaler \
+            -o jsonpath='{.metadata.annotations.symphony\.morganson\.me/source-revision}')"
+          orchestrator_image="$(kubectl -n symphony get deployment \
+            symphony-orchestrator \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="orchestrator")].image}')"
+          worker_image="$(kubectl -n symphony get statefulset \
+            symphony-worker \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="worker")].image}')"
+          reclaimer_image="$(kubectl -n symphony get statefulset \
+            symphony-worker \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="workspace-reclaimer")].image}')"
+          autoscaler_image="$(kubectl -n symphony get deployment \
+            symphony-autoscaler \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="autoscaler")].image}')"
+
+          reuse_available=true
+          if [[ ! "$orchestrator_source" =~ ^[0-9a-f]{40}$ ]] ||
+              [[ "$worker_source" != "$orchestrator_source" ]] ||
+              [[ "$autoscaler_source" != "$orchestrator_source" ]] ||
+              [[ ! "$orchestrator_image" =~ ^ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:[0-9a-f]{64}$ ]] ||
+              [[ ! "$worker_image" =~ ^ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:[0-9a-f]{64}$ ]] ||
+              [[ "$reclaimer_image" != "$worker_image" ]] ||
+              [[ ! "$autoscaler_image" =~ ^ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:[0-9a-f]{64}$ ]]; then
+            reuse_available=false
+          fi
+          if [[ "$reuse_available" != "true" ]]; then
+            orchestrator_source=""
+            orchestrator_image=""
+            worker_image=""
+            autoscaler_image=""
+          fi
+          {
+            echo "reuse_available=$reuse_available"
+            echo "bootstrap=false"
+            echo "source_revision=$orchestrator_source"
+            echo "orchestrator_image=$orchestrator_image"
+            echo "worker_image=$worker_image"
+            echo "autoscaler_image=$autoscaler_image"
+          } >> "$GITHUB_OUTPUT"
+
+  classify:
+    if: >-
+      always() &&
+      (github.event_name == 'pull_request' ||
+      needs.deployment-plan.result == 'success')
+    needs: deployment-plan
+    runs-on: ubuntu-24.04
+    outputs:
+      orchestrator: ${{ steps.images.outputs.orchestrator }}
+      worker: ${{ steps.images.outputs.worker }}
+      autoscaler: ${{ steps.images.outputs.autoscaler }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Classify image input closures
+        id: images
+        shell: bash
+        env:
+          REUSE_AVAILABLE: ${{ needs.deployment-plan.outputs.reuse_available }}
+          LIVE_SOURCE_REVISION: ${{ needs.deployment-plan.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          changed_paths=()
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            mapfile -t changed_paths < <(
+              git diff --name-only \
+                "${{ github.event.pull_request.base.sha }}" "${GITHUB_SHA}"
+            )
+            bash scripts/classify-image-inputs.sh "${changed_paths[@]}" |
+              tee -a "$GITHUB_OUTPUT"
+          elif [[ "$REUSE_AVAILABLE" == "true" ]]; then
+            bash scripts/classify-deployment-images.sh \
+              "$LIVE_SOURCE_REVISION" \
+              "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+          else
+            bash scripts/classify-image-inputs.sh | tee -a "$GITHUB_OUTPUT"
+          fi
+
   test:
+    if: always() && needs.classify.result == 'success'
+    needs: classify
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,19 +189,36 @@ jobs:
           cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
           cargo +1.97.1 test --workspace --all-targets --locked
       - name: Validate deployment images
+        env:
+          BUILD_ORCHESTRATOR: ${{ needs.classify.outputs.orchestrator }}
+          BUILD_WORKER: ${{ needs.classify.outputs.worker }}
+          BUILD_AUTOSCALER: ${{ needs.classify.outputs.autoscaler }}
         run: |
-          docker build -t symphony-runtime-base:test -f docker/runtime-base/Dockerfile .
-          docker build -t symphony-release:test -f docker/release/Dockerfile .
-          docker build \
-            --build-arg RUNTIME_BASE=symphony-runtime-base:test \
-            --build-arg SYMPHONY_RELEASE_IMAGE=symphony-release:test \
-            -t symphony-orchestrator:test \
-            -f docker/orchestrator/Dockerfile .
-          docker build \
-            --build-arg RUNTIME_BASE=symphony-runtime-base:test \
-            -t symphony-worker:test \
-            -f docker/worker/Dockerfile .
-          docker build -t symphony-autoscaler:test -f docker/autoscaler/Dockerfile .
+          set -euo pipefail
+          if [[ "$BUILD_ORCHESTRATOR" == "true" ||
+                "$BUILD_WORKER" == "true" ]]; then
+            docker build -t symphony-runtime-base:test \
+              -f docker/runtime-base/Dockerfile .
+          fi
+          if [[ "$BUILD_ORCHESTRATOR" == "true" ]]; then
+            docker build -t symphony-release:test \
+              -f docker/release/Dockerfile .
+            docker build \
+              --build-arg RUNTIME_BASE=symphony-runtime-base:test \
+              --build-arg SYMPHONY_RELEASE_IMAGE=symphony-release:test \
+              -t symphony-orchestrator:test \
+              -f docker/orchestrator/Dockerfile .
+          fi
+          if [[ "$BUILD_WORKER" == "true" ]]; then
+            docker build \
+              --build-arg RUNTIME_BASE=symphony-runtime-base:test \
+              -t symphony-worker:test \
+              -f docker/worker/Dockerfile .
+          fi
+          if [[ "$BUILD_AUTOSCALER" == "true" ]]; then
+            docker build -t symphony-autoscaler:test \
+              -f docker/autoscaler/Dockerfile .
+          fi
       - name: Test worker authentication
         run: bash tests/test-worker-auth.sh
       - name: Test workspace bootstrap
@@ -79,10 +235,12 @@ jobs:
         env:
           KUSTOMIZE: kustomize build
         run: bash tests/test-kustomize-boundaries.sh
+      - name: Test image input classification
+        run: bash tests/test-image-input-classifier.sh
 
   publish:
     if: github.event_name != 'pull_request'
-    needs: test
+    needs: [classify, test, deployment-plan]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -99,94 +257,129 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build images
+        env:
+          BUILD_ORCHESTRATOR: ${{ needs.classify.outputs.orchestrator }}
+          BUILD_WORKER: ${{ needs.classify.outputs.worker }}
+          BUILD_AUTOSCALER: ${{ needs.classify.outputs.autoscaler }}
+          REUSE_AVAILABLE: ${{ needs.deployment-plan.outputs.reuse_available }}
         run: |
-          docker build -t symphony-runtime-base:do -f docker/runtime-base/Dockerfile .
-          docker build -t symphony-release:do -f docker/release/Dockerfile .
-          docker build \
-            --build-arg RUNTIME_BASE=symphony-runtime-base:do \
-            --build-arg SYMPHONY_RELEASE_IMAGE=symphony-release:do \
-            -t "ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA}" \
-            -f docker/orchestrator/Dockerfile .
-          docker build \
-            --build-arg RUNTIME_BASE=symphony-runtime-base:do \
-            -t "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" \
-            -t ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt \
-            -f docker/worker/Dockerfile .
-          docker run --rm --entrypoint gh \
-            "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" --version
-          docker build \
-            -t "ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA}" \
-            -f docker/autoscaler/Dockerfile .
+          set -euo pipefail
+          if [[ "$REUSE_AVAILABLE" != "true" ]] &&
+              [[ "$BUILD_ORCHESTRATOR" != "true" ||
+                "$BUILD_WORKER" != "true" ||
+                "$BUILD_AUTOSCALER" != "true" ]]; then
+            echo "incomplete live state requires rebuilding every image" >&2
+            exit 1
+          fi
+          if [[ "$BUILD_ORCHESTRATOR" == "true" ||
+                "$BUILD_WORKER" == "true" ]]; then
+            docker build -t symphony-runtime-base:do \
+              -f docker/runtime-base/Dockerfile .
+          fi
+          if [[ "$BUILD_ORCHESTRATOR" == "true" ]]; then
+            docker build -t symphony-release:do \
+              -f docker/release/Dockerfile .
+            docker build \
+              --build-arg RUNTIME_BASE=symphony-runtime-base:do \
+              --build-arg SYMPHONY_RELEASE_IMAGE=symphony-release:do \
+              -t "ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA}" \
+              -f docker/orchestrator/Dockerfile .
+          fi
+          if [[ "$BUILD_WORKER" == "true" ]]; then
+            docker build \
+              --build-arg RUNTIME_BASE=symphony-runtime-base:do \
+              -t "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" \
+              -t ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt \
+              -f docker/worker/Dockerfile .
+            docker run --rm --entrypoint gh \
+              "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" \
+              --version
+          fi
+          if [[ "$BUILD_AUTOSCALER" == "true" ]]; then
+            docker build \
+              -t "ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA}" \
+              -f docker/autoscaler/Dockerfile .
+          fi
       - name: Push images
+        env:
+          BUILD_ORCHESTRATOR: ${{ needs.classify.outputs.orchestrator }}
+          BUILD_WORKER: ${{ needs.classify.outputs.worker }}
+          BUILD_AUTOSCALER: ${{ needs.classify.outputs.autoscaler }}
         run: |
-          docker push "ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA}"
-          docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt
-          docker push "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}"
-          docker push "ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA}"
+          set -euo pipefail
+          if [[ "$BUILD_ORCHESTRATOR" == "true" ]]; then
+            docker push "ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA}"
+          fi
+          if [[ "$BUILD_WORKER" == "true" ]]; then
+            docker push ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt
+            docker push "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}"
+          fi
+          if [[ "$BUILD_AUTOSCALER" == "true" ]]; then
+            docker push "ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA}"
+          fi
       - name: Resolve immutable image digests
         id: image-digests
+        env:
+          BUILD_ORCHESTRATOR: ${{ needs.classify.outputs.orchestrator }}
+          BUILD_WORKER: ${{ needs.classify.outputs.worker }}
+          BUILD_AUTOSCALER: ${{ needs.classify.outputs.autoscaler }}
+          LIVE_ORCHESTRATOR_IMAGE: ${{ needs.deployment-plan.outputs.orchestrator_image }}
+          LIVE_WORKER_IMAGE: ${{ needs.deployment-plan.outputs.worker_image }}
+          LIVE_AUTOSCALER_IMAGE: ${{ needs.deployment-plan.outputs.autoscaler_image }}
         run: |
           set -euo pipefail
           orchestrator_repository="ghcr.io/jasonmorganson/symphony-k8s-orchestrator"
           worker_repository="ghcr.io/jasonmorganson/symphony-k8s-worker"
           autoscaler_repository="ghcr.io/jasonmorganson/symphony-k8s-autoscaler"
-          orchestrator_digest="$(docker buildx imagetools inspect \
-            "${orchestrator_repository}:${GITHUB_SHA}" --format '{{.Manifest.Digest}}')"
-          worker_digest="$(docker buildx imagetools inspect \
-            "${worker_repository}:${GITHUB_SHA}" --format '{{.Manifest.Digest}}')"
-          autoscaler_digest="$(docker buildx imagetools inspect \
-            "${autoscaler_repository}:${GITHUB_SHA}" --format '{{.Manifest.Digest}}')"
+          orchestrator_image="$LIVE_ORCHESTRATOR_IMAGE"
+          worker_image="$LIVE_WORKER_IMAGE"
+          autoscaler_image="$LIVE_AUTOSCALER_IMAGE"
+          if [[ "$BUILD_ORCHESTRATOR" == "true" ]]; then
+            digest="$(docker buildx imagetools inspect \
+              "${orchestrator_repository}:${GITHUB_SHA}" \
+              --format '{{.Manifest.Digest}}')"
+            orchestrator_image="${orchestrator_repository}@${digest}"
+          else
+            bash scripts/verify-image-digest.sh orchestrator \
+              "$orchestrator_image" "$orchestrator_repository" >/dev/null
+          fi
+          if [[ "$BUILD_WORKER" == "true" ]]; then
+            digest="$(docker buildx imagetools inspect \
+              "${worker_repository}:${GITHUB_SHA}" \
+              --format '{{.Manifest.Digest}}')"
+            worker_image="${worker_repository}@${digest}"
+          else
+            bash scripts/verify-image-digest.sh worker \
+              "$worker_image" "$worker_repository" >/dev/null
+          fi
+          if [[ "$BUILD_AUTOSCALER" == "true" ]]; then
+            digest="$(docker buildx imagetools inspect \
+              "${autoscaler_repository}:${GITHUB_SHA}" \
+              --format '{{.Manifest.Digest}}')"
+            autoscaler_image="${autoscaler_repository}@${digest}"
+          else
+            bash scripts/verify-image-digest.sh autoscaler \
+              "$autoscaler_image" "$autoscaler_repository" >/dev/null
+          fi
           {
-            echo "orchestrator_image=${orchestrator_repository}@${orchestrator_digest}"
-            echo "worker_image=${worker_repository}@${worker_digest}"
-            echo "autoscaler_image=${autoscaler_repository}@${autoscaler_digest}"
+            echo "orchestrator_image=$orchestrator_image"
+            echo "worker_image=$worker_image"
+            echo "autoscaler_image=$autoscaler_image"
           } >> "$GITHUB_OUTPUT"
 
   deploy:
     if: github.ref == 'refs/heads/master'
-    needs: publish
+    needs: [classify, deployment-plan, publish]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     environment:
       name: production
       url: https://symphony.morganson.me
-    concurrency:
-      group: production-doks
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
-      - name: Classify worker rollout
-        id: worker-rollout
-        shell: bash
-        run: |
-          set -euo pipefail
-          skip_restart=false
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]] &&
-              git rev-parse --verify "${GITHUB_SHA}^" >/dev/null 2>&1; then
-            mapfile -t changed_paths < <(
-              git diff --name-only "${GITHUB_SHA}^" "${GITHUB_SHA}"
-            )
-            if (( ${#changed_paths[@]} > 0 )); then
-              skip_restart=true
-              for path in "${changed_paths[@]}"; do
-                case "$path" in
-                  config/workflow-throughput-overlay.md | \
-                  tests/test-workflow-overlay.sh | \
-                  scripts/render-workflow.sh | \
-                  docker/orchestrator/*)
-                    ;;
-                  *)
-                    skip_restart=false
-                    break
-                    ;;
-                esac
-              done
-            fi
-          fi
-          echo "skip_restart=$skip_restart" >> "$GITHUB_OUTPUT"
       - name: Install doctl
         uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
@@ -205,7 +398,9 @@ jobs:
           SYMPHONY_WAIT_FOR_IDLE: "false"
           SYMPHONY_IDLE_TIMEOUT_SECONDS: "14400"
           SYMPHONY_IDLE_POLL_SECONDS: "30"
-          SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART: ${{ steps.worker-rollout.outputs.skip_restart }}
+          SYMPHONY_REUSE_ORCHESTRATOR_IMAGE: ${{ needs.classify.outputs.orchestrator == 'false' }}
+          SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART: ${{ needs.classify.outputs.worker == 'false' }}
+          SYMPHONY_REUSE_AUTOSCALER_IMAGE: ${{ needs.classify.outputs.autoscaler == 'false' }}
         run: bash scripts/deploy-digitalocean.sh
       - name: Record deployment
         env:
