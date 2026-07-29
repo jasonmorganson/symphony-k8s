@@ -13,10 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     unzip \
     jq \
+    ripgrep \
     && gh --version \
     && zip --version \
     && unzip -v \
     && jq --version \
+    && rg --version \
     && rm -rf /var/lib/apt/lists/*
 
 ARG MISE_VERSION=2026.7.5
