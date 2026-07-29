@@ -140,3 +140,36 @@ When every required post-merge gate succeeds, transition the issue directly from
 the issue in `Merging` and follow the canonical failure-repair and completion semantics for that
 concrete failure; do not use the merged or closed pull-request state or a merely pending gate as a
 failure signal. This rule changes neither the required gates nor their fail-closed interpretation.
+
+The canonical guardrail that says an issue with an attached merged pull request should move to
+`Done` is only a routing shorthand into this post-merge reconciliation. It never authorizes the
+transition before every required containing-main CI, deployment, and other post-merge gate has a
+terminal successful result. Pending, missing, stale, or ambiguous evidence is not success.
+
+# Require terminal evidence before a successor repair
+
+Do not open, reopen, or move an issue into an active successor-repair lane from a local failure,
+another issue's integration failure, or any other cross-issue observation while the authoritative
+containing-main gate for the alleged owning change is still pending. Record the observation on the
+currently active issue and wait outside the model for the containing-main gate to become terminal.
+
+Only a terminal authoritative failure may create or reactivate a successor repair, and its workpad
+must identify the exact containing-main revision, gate URL, failed job, and failure signal. A
+terminal successful containing-main gate disproves the proposed successor lane unless the
+successor issue independently reproduces its own acceptance failure on that same containing-main
+revision. Do not consume a worker rerunning implementation tests merely to confirm a pending
+cross-issue suspicion.
+
+# Recover issues bounced after merge
+
+At the start of any active turn, if an `In Progress` or `Rework` issue has exactly one
+unambiguous attached pull request and that pull request is already merged, route directly to
+post-merge reconciliation before reproducing, planning, editing, reviewing, or running
+implementation tests. Verify the containing-main revision and every required post-merge gate.
+
+When those gates are already terminal and successful, update the durable workpad with their exact
+evidence and transition the issue directly to `Done` using the canonical workflow-owned
+transition. Do not create a successor branch, rerun the implementation test suite, or return the
+issue to `Merging` first. If any required gate is pending, keep the issue in its current active
+state and wait outside the model. If a gate is terminal and failed, follow the canonical
+failure-repair semantics for that exact failure.

@@ -116,6 +116,32 @@ grep -Fq 'When a required post-merge gate fails, keep' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'the issue in `Merging` and follow the canonical failure-repair' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'only a routing shorthand into this post-merge reconciliation' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Pending, missing, stale, or ambiguous evidence is not success.' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Require terminal evidence before a successor repair' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not open, reopen, or move an issue into an active successor-repair lane' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'while the authoritative' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'containing-main gate for the alleged owning change is still pending' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Only a terminal authoritative failure may create or reactivate a successor repair' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'terminal successful containing-main gate disproves the proposed successor lane' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Recover issues bounced after merge' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'if an `In Progress` or `Rework` issue has exactly one' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'route directly to' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'post-merge reconciliation before reproducing, planning, editing, reviewing, or running' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'transition the issue directly to `Done` using the canonical workflow-owned' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not create a successor branch, rerun the implementation test suite' \
+  "$TEMP_DIR/throughput-rendered.md"
 if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
     "$TEMP_DIR/throughput-rendered.md"; then
   echo "throughput overlay must not serialize Merging work" >&2
@@ -148,6 +174,10 @@ grep -Fqx '# Serialize gates that share repository-visible temporary state' \
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Retain Merging through post-merge verification' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Require terminal evidence before a successor repair' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Recover issues bounced after merge' \
   "$TEMP_DIR/runtime-workflow.md"
 if grep -Fq 'Stale deployment overlay.' "$TEMP_DIR/runtime-workflow.md"; then
   echo "runtime workflow must replace the stale mounted deployment overlay" >&2
