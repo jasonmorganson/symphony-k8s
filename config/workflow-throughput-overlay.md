@@ -97,6 +97,25 @@ test supports it. Concurrency is still allowed for gates whose inputs and output
 isolated. Record the isolation decision when parallel execution materially affects the completion
 timeline.
 
+# Bound long-running command output
+
+Keep complete validation evidence without feeding the full output of a verbose build, test, audit,
+or deployment command back into the model on every wait. Before starting a command that may run
+longer than one tool interval or emit more than 200 lines, create a task-scoped log below the path
+returned by `git rev-parse --git-path symphony-logs`. Run the command with stdout and stderr
+redirected to that log while preserving its exact exit status.
+
+While it runs, report only a compact heartbeat containing the command identity, elapsed time, and
+current log byte or line count. Do not repeatedly stream or reread the accumulated log. On success,
+return the exit status and a concise result summary. On failure, return the exit status, the log
+path, the exact matched failure signal, and at most the final 200 relevant lines; inspect an
+additional bounded slice only when that tail cannot classify the failure.
+
+The durable log is evidence, not disposable console noise: retain it through the turn and record
+the exact command, result, and relevant failure or success signal in the workpad. Output bounding
+must never hide a nonzero exit, weaken a gate, omit a required test, or replace required uploaded
+artifacts. Use direct output for short, already-quiet commands.
+
 # Dependency-upgrade scope budget
 
 Before a dependency upgrade expands into replacing a provider-facing development tool, record an
