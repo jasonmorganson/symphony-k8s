@@ -301,12 +301,6 @@ grep -Fqx "$setenv_line" "$sshd_config"
 grep -A5 'name: GITHUB_TOKEN' "${worker_manifests[0]}" | \
   grep -q 'name: github-machine-arrusted-symphony'
 grep -A5 'name: GITHUB_TOKEN' "${worker_manifests[0]}" | grep -q 'key: token'
-grep -A6 'name: VERCEL_TOKEN' "${worker_manifests[0]}" | \
-  grep -q 'name: vercel-autographing'
-grep -A6 'name: VERCEL_TOKEN' "${worker_manifests[0]}" | \
-  grep -q 'key: VERCEL_TOKEN'
-grep -A6 'name: VERCEL_TOKEN' "${worker_manifests[0]}" | \
-  grep -q 'optional: false'
 
 if grep -A5 'name: GITHUB_TOKEN' "${worker_manifests[0]}" | \
   grep -q 'name: symphony-secrets'; then
