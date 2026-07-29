@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - .dockerignore
+      - docker-bake.hcl
       - Cargo.lock
       - Cargo.toml
       - rust-toolchain.toml
@@ -19,6 +20,7 @@ on:
     branches: [master]
     paths:
       - .dockerignore
+      - docker-bake.hcl
       - Cargo.lock
       - Cargo.toml
       - rust-toolchain.toml
@@ -177,6 +179,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v4.2.0
+      - name: Test image pipeline contract
+        run: bash tests/test-image-pipeline.sh
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
       - name: Install pinned Kustomize
@@ -188,37 +193,43 @@ jobs:
           cargo +1.97.1 fmt --all -- --check
           cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
           cargo +1.97.1 test --workspace --all-targets --locked
-      - name: Validate deployment images
+      - name: Select validation image targets
+        id: image-targets
         env:
           BUILD_ORCHESTRATOR: ${{ needs.classify.outputs.orchestrator }}
           BUILD_WORKER: ${{ needs.classify.outputs.worker }}
           BUILD_AUTOSCALER: ${{ needs.classify.outputs.autoscaler }}
         run: |
           set -euo pipefail
-          if [[ "$BUILD_ORCHESTRATOR" == "true" ||
-                "$BUILD_WORKER" == "true" ]]; then
-            docker build -t symphony-runtime-base:test \
-              -f docker/runtime-base/Dockerfile .
-          fi
+          targets=()
           if [[ "$BUILD_ORCHESTRATOR" == "true" ]]; then
-            docker build -t symphony-release:test \
-              -f docker/release/Dockerfile .
-            docker build \
-              --build-arg RUNTIME_BASE=symphony-runtime-base:test \
-              --build-arg SYMPHONY_RELEASE_IMAGE=symphony-release:test \
-              -t symphony-orchestrator:test \
-              -f docker/orchestrator/Dockerfile .
+            targets+=(orchestrator)
           fi
           if [[ "$BUILD_WORKER" == "true" ]]; then
-            docker build \
-              --build-arg RUNTIME_BASE=symphony-runtime-base:test \
-              -t symphony-worker:test \
-              -f docker/worker/Dockerfile .
+            targets+=(worker)
           fi
           if [[ "$BUILD_AUTOSCALER" == "true" ]]; then
-            docker build -t symphony-autoscaler:test \
-              -f docker/autoscaler/Dockerfile .
+            targets+=(autoscaler)
           fi
+          (IFS=,; echo "targets=${targets[*]}") >> "$GITHUB_OUTPUT"
+      - name: Validate deployment images
+        if: steps.image-targets.outputs.targets != ''
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          source: .
+          load: true
+          targets: ${{ steps.image-targets.outputs.targets }}
+          set: |
+            runtime-base.tags=symphony-runtime-base:test
+            runtime-base.cache-to=type=gha,mode=max,scope=symphony-runtime-base
+            release.tags=symphony-release:test
+            release.cache-to=type=gha,mode=max,scope=symphony-release
+            orchestrator.tags=symphony-orchestrator:test
+            orchestrator.cache-to=type=gha,mode=max,scope=symphony-orchestrator
+            worker.tags=symphony-worker:test
+            worker.cache-to=type=gha,mode=max,scope=symphony-worker
+            autoscaler.tags=symphony-autoscaler:test
+            autoscaler.cache-to=type=gha,mode=max,scope=symphony-autoscaler
       - name: Test worker authentication
         run: bash tests/test-worker-auth.sh
       - name: Test workspace bootstrap
@@ -251,12 +262,13 @@ jobs:
       autoscaler_image: ${{ steps.image-digests.outputs.autoscaler_image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v4.2.0
       - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build images
+      - name: Validate image build plan
         env:
           BUILD_ORCHESTRATOR: ${{ needs.classify.outputs.orchestrator }}
           BUILD_WORKER: ${{ needs.classify.outputs.worker }}
@@ -271,35 +283,44 @@ jobs:
             echo "incomplete live state requires rebuilding every image" >&2
             exit 1
           fi
-          if [[ "$BUILD_ORCHESTRATOR" == "true" ||
-                "$BUILD_WORKER" == "true" ]]; then
-            docker build -t symphony-runtime-base:do \
-              -f docker/runtime-base/Dockerfile .
-          fi
+      - name: Select publish image targets
+        id: publish-image-targets
+        env:
+          BUILD_ORCHESTRATOR: ${{ needs.classify.outputs.orchestrator }}
+          BUILD_WORKER: ${{ needs.classify.outputs.worker }}
+          BUILD_AUTOSCALER: ${{ needs.classify.outputs.autoscaler }}
+        run: |
+          set -euo pipefail
+          targets=()
           if [[ "$BUILD_ORCHESTRATOR" == "true" ]]; then
-            docker build -t symphony-release:do \
-              -f docker/release/Dockerfile .
-            docker build \
-              --build-arg RUNTIME_BASE=symphony-runtime-base:do \
-              --build-arg SYMPHONY_RELEASE_IMAGE=symphony-release:do \
-              -t "ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${GITHUB_SHA}" \
-              -f docker/orchestrator/Dockerfile .
+            targets+=(orchestrator)
           fi
           if [[ "$BUILD_WORKER" == "true" ]]; then
-            docker build \
-              --build-arg RUNTIME_BASE=symphony-runtime-base:do \
-              -t "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" \
-              -t ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt \
-              -f docker/worker/Dockerfile .
-            docker run --rm --entrypoint gh \
-              "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" \
-              --version
+            targets+=(worker)
           fi
           if [[ "$BUILD_AUTOSCALER" == "true" ]]; then
-            docker build \
-              -t "ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${GITHUB_SHA}" \
-              -f docker/autoscaler/Dockerfile .
+            targets+=(autoscaler)
           fi
+          (IFS=,; echo "targets=${targets[*]}") >> "$GITHUB_OUTPUT"
+      - name: Build images
+        if: steps.publish-image-targets.outputs.targets != ''
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          source: .
+          load: true
+          targets: ${{ steps.publish-image-targets.outputs.targets }}
+          set: |
+            runtime-base.tags=symphony-runtime-base:do
+            release.tags=symphony-release:do
+            orchestrator.tags=ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${{ github.sha }}
+            worker.tags=ghcr.io/jasonmorganson/symphony-k8s-worker:${{ github.sha }}
+            worker.tags=ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt
+            autoscaler.tags=ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${{ github.sha }}
+      - name: Verify worker image
+        if: needs.classify.outputs.worker == 'true'
+        run: |
+          docker run --rm --entrypoint gh \
+            "ghcr.io/jasonmorganson/symphony-k8s-worker:${GITHUB_SHA}" --version
       - name: Push images
         env:
           BUILD_ORCHESTRATOR: ${{ needs.classify.outputs.orchestrator }}
