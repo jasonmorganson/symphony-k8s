@@ -175,10 +175,22 @@ remote, update the corresponding remote-tracking ref, and compare that freshly f
 pull request head. Do not rely on a workspace's pre-existing `origin/main`, a bootstrap snapshot, a
 cached pull-request base OID, or a prior turn's workpad claim.
 
-If the fresh target is not an ancestor of the pull request head, keep the issue in `Merging`, rebase
-the branch onto that target, run the required validation, push the repaired head, and continue the
-canonical land flow. Staleness alone never returns an authorized issue to `Human Review`. Record the
-exact fetched target SHA and the ancestry result in the durable workpad before landing.
+If the fresh target is not an ancestor of the pull request head, keep the issue in `Merging` and
+rebase the branch onto that target. Once the rebase repair is committed, the worktree is clean,
+the fresh target is an ancestor of the repaired head, and focused conflict-surface tests pass,
+publish that exact head immediately with `--force-with-lease`. Start exact-head hosted CI, then
+run the long authoritative local gate and the one consolidated review panel while hosted CI is
+in flight. Do not hold a publishable rebase repair behind those long gates.
+
+If a later local gate, review finding, or hosted check identifies a concrete defect,
+treat the earlier hosted run as superseded: make one bounded repair batch, rerun the invalidated
+focused
+proof, commit, republish with `--force-with-lease`, and restart exact-head evidence collection.
+Never merge until the final remote head is clean and both its required hosted checks and all
+required local gate and consolidated-review evidence are green.
+Staleness alone never returns an authorized issue to `Human Review`.
+Record the exact fetched target SHA and the ancestry result, published
+head, and any superseded run in the durable workpad before landing.
 
 # Retain Merging through post-merge verification
 

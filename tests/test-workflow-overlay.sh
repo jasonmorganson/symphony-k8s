@@ -98,6 +98,14 @@ grep -Fq 'Do not silently turn a package update into a provider-tool migration' 
 grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'explicit authenticated fetch of the target branch' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'publish that exact head immediately with `--force-with-lease`' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not hold a publishable rebase repair behind those long gates.' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'treat the earlier hosted run as superseded' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Never merge until the final remote head is clean' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Staleness alone never returns an authorized issue to `Human Review`' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Human Review maintenance lane' "$TEMP_DIR/throughput-rendered.md"
@@ -215,6 +223,10 @@ grep -Fqx '# Serialize gates that share repository-visible temporary state' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/runtime-workflow.md"
+grep -Fq 'publish that exact head immediately with `--force-with-lease`' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fq 'Never merge until the final remote head is clean' \
+  "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Retain Merging through post-merge verification' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Require terminal evidence before a successor repair' \
