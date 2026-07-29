@@ -53,7 +53,8 @@ grep -q 'Never move the issue from `Merging` to `In Progress`, `Human' \
   "$throughput_overlay"
 grep -q 'containing-main proof has not completed yet' "$throughput_overlay"
 grep -q 'transition the issue directly from `Merging` to' "$throughput_overlay"
-grep -q 'keep the issue in `Merging` and follow the canonical failure-repair' \
+grep -q 'When a required post-merge gate fails, keep' "$throughput_overlay"
+grep -q 'the issue in `Merging` and follow the canonical failure-repair' \
   "$throughput_overlay"
 if grep -q 'symphony_merge_writer\\|action.*acquire\\|action.*yield' "$throughput_overlay"; then
   echo "workflow overlay must not install custom merge serialization" >&2

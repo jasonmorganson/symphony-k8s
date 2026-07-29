@@ -112,7 +112,9 @@ grep -Fq 'containing-main proof has not completed yet' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'transition the issue directly from `Merging` to' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'keep the issue in `Merging` and follow the canonical failure-repair' \
+grep -Fq 'When a required post-merge gate fails, keep' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'the issue in `Merging` and follow the canonical failure-repair' \
   "$TEMP_DIR/throughput-rendered.md"
 if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
     "$TEMP_DIR/throughput-rendered.md"; then
