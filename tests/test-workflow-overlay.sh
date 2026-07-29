@@ -100,6 +100,13 @@ grep -Fq 'explicit authenticated fetch of the target branch' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Staleness alone never returns an authorized issue to `Human Review`' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -A1 '^  observed_states:$' "$ROOT_DIR/config/workflow-runtime.yaml" |
+  grep -Fq '    - Human Review'
+if grep -A5 '^  active_states:$' "$ROOT_DIR/config/workflow-runtime.yaml" |
+    grep -Fq 'Human Review'; then
+  echo "Human Review must remain excluded from active states" >&2
+  exit 1
+fi
 grep -Fq 'exact fetched target SHA and the ancestry result' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Retain Merging through post-merge verification' \
