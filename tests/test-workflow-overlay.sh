@@ -51,6 +51,13 @@ grep -Fq 'explicit scope-budget decision in the durable workpad' \
 grep -Fq "ticket's bounded exception" "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Do not silently turn a package update into a provider-tool migration' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'explicit authenticated fetch of the target branch' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Staleness alone never returns an authorized issue to `Human Review`' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'exact fetched target SHA and the ancestry result' \
+  "$TEMP_DIR/throughput-rendered.md"
 if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
     "$TEMP_DIR/throughput-rendered.md"; then
   echo "throughput overlay must not serialize Merging work" >&2
@@ -71,6 +78,7 @@ grep -Fqx 'Canonical instruction.' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/runtime-workflow.md"
 if grep -Fq 'Stale deployment overlay.' "$TEMP_DIR/runtime-workflow.md"; then
   echo "runtime workflow must replace the stale mounted deployment overlay" >&2
   exit 1
