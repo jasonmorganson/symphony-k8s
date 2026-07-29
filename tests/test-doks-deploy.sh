@@ -383,10 +383,11 @@ grep -F -- "-n symphony get statefulset symphony-worker -o jsonpath={.spec.repli
 grep -F "build worker_replicas=2" "$KUSTOMIZE_LOG"
 grep -F "build autoscaler_replicas=0" "$KUSTOMIZE_LOG"
 jq -se '
-  length == 3 and
+  length == 4 and
   .[0].drained_worker_hosts == ["worker-0", "worker-1"] and
   .[1].drained_worker_hosts == ["worker-0", "worker-1"] and
-  .[2].drained_worker_hosts == []
+  .[2].drained_worker_hosts == ["worker-0", "worker-1"] and
+  .[3].drained_worker_hosts == []
 ' "$DRAIN_LOG" >/dev/null
 scale_down_line="$(grep -nF -- \
   '-n symphony scale deployment/symphony-autoscaler --replicas=0' \
@@ -414,13 +415,20 @@ apply_event_line="$(grep -nF 'kubectl:apply -f ' "$EVENT_LOG" |
   head -1 | cut -d: -f1)"
 restore_drain_line="$(grep -nF 'drain:[]' "$EVENT_LOG" |
   tail -1 | cut -d: -f1)"
+post_restart_drain_line="$(grep -nF 'drain:["worker-0","worker-1"]' \
+  "$EVENT_LOG" | tail -1 | cut -d: -f1)"
+first_worker_delete_line="$(grep -nF \
+  'kubectl:-n symphony delete pod/symphony-worker-1 --wait=true --timeout=5m' \
+  "$EVENT_LOG" | head -1 | cut -d: -f1)"
 (( first_idle_poll_line < first_drain_line &&
    first_drain_line < scale_down_event_line &&
    scale_down_event_line < scale_down_ready_line &&
    scale_down_ready_line < second_drain_line &&
    second_drain_line < post_quiesce_idle_poll_line &&
    post_quiesce_idle_poll_line < apply_event_line &&
-   apply_event_line < restore_drain_line ))
+   apply_event_line < post_restart_drain_line &&
+   post_restart_drain_line < first_worker_delete_line &&
+   first_worker_delete_line < restore_drain_line ))
 grep -F "annotate --overwrite deployment/symphony-orchestrator deployment/symphony-autoscaler statefulset/symphony-worker symphony.morganson.me/source-revision=$SOURCE_REVISION" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-orchestrator --timeout=20m" "$KUBECTL_LOG"
 grep -F -- "-n symphony rollout status deployment/symphony-autoscaler --timeout=10m" "$KUBECTL_LOG"
@@ -597,8 +605,8 @@ fi
 assert_quiesced
 
 reset_logs
-DRAIN_FAIL_AT=3 run_deploy
-[[ "$(wc -l < "$DRAIN_LOG" | tr -d ' ')" == "4" ]]
+DRAIN_FAIL_AT=4 run_deploy
+[[ "$(wc -l < "$DRAIN_LOG" | tr -d ' ')" == "5" ]]
 assert_restored
 
 reset_logs
