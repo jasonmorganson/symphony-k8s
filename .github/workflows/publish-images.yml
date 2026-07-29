@@ -240,6 +240,8 @@ jobs:
         run: bash tests/test-workflow-overlay.sh
       - name: Test DOKS deployment hardening
         run: bash tests/test-doks-deploy.sh
+      - name: Test master deployment freshness
+        run: bash tests/test-master-deploy-freshness.sh
       - name: Test Kustomize installer retries
         run: bash tests/test-install-kustomize.sh
       - name: Test Kustomize deployment boundaries
@@ -409,6 +411,10 @@ jobs:
         run: |
           bash scripts/install-kustomize.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Verify deployment revision is current master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/verify-current-master.sh
       - name: Deploy immutable images to DOKS
         env:
           ORCHESTRATOR_IMAGE: ${{ needs.publish.outputs.orchestrator_image }}
