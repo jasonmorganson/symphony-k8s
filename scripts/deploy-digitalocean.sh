@@ -29,6 +29,7 @@ APPLY_STARTED=0
 QUIESCE_STARTED=0
 ORIGINAL_AUTOSCALER_REPLICAS=""
 ORIGINAL_DRAINS_JSON=""
+QUIESCED_DRAINS_JSON=""
 
 emit_diagnostics() {
   if (( MUTATION_STARTED == 0 )); then
@@ -166,6 +167,7 @@ quiesce_symphony() {
         all(.[]; . as $host |
         type == "string" and ($configured | index($host)) != null)
       then . else error("invalid drained worker hosts") end')"
+  QUIESCED_DRAINS_JSON="$configured_hosts_json"
   ORIGINAL_AUTOSCALER_REPLICAS="$("$KUBECTL" -n symphony get \
     deployment symphony-autoscaler -o jsonpath='{.spec.replicas}')"
   require_nonnegative_integer "live Symphony autoscaler replicas" \
@@ -173,11 +175,11 @@ quiesce_symphony() {
 
   QUIESCE_STARTED=1
   MUTATION_STARTED=1
-  set_worker_drains "$configured_hosts_json"
+  set_worker_drains "$QUIESCED_DRAINS_JSON"
   refresh_kubeconfig
   "$KUBECTL" -n symphony scale deployment/symphony-autoscaler --replicas=0
   "$KUBECTL" -n symphony rollout status deployment/symphony-autoscaler --timeout=5m
-  set_worker_drains "$configured_hosts_json"
+  set_worker_drains "$QUIESCED_DRAINS_JSON"
 }
 
 restore_symphony_admissions() {
@@ -570,6 +572,13 @@ done
 
 refresh_kubeconfig
 "$KUBECTL" -n symphony rollout status deployment/symphony-orchestrator --timeout=20m
+
+if (( QUIESCE_STARTED == 1 )); then
+  # Worker drains are held in orchestrator runtime state. Reapply the exact
+  # quiesced set after replacing the orchestrator so its restart cannot reopen
+  # admissions while worker pods are being replaced.
+  set_worker_drains "$QUIESCED_DRAINS_JSON"
+fi
 
 if (( image_override_count == 3 )); then
   verify_workload_templates
