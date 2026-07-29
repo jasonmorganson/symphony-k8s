@@ -78,7 +78,16 @@ deploy_line="$(grep -n 'name: Deploy immutable images to DOKS' "$workflow" | cut
 [[ -n "$guard_line" && -n "$deploy_line" && "$guard_line" -lt "$deploy_line" ]]
 grep -A3 'name: Verify deployment revision is current master' "$workflow" |
   grep -Fq "GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}"
-grep -A1 "'production-doks'" "$workflow" |
-  grep -q 'cancel-in-progress: false'
+
+concurrency_block="$(
+  awk '
+    /^concurrency:$/ { in_concurrency = 1; next }
+    in_concurrency && /^[^[:space:]]/ { exit }
+    in_concurrency { print }
+  ' "$workflow"
+)"
+grep -Fq "|| 'production-doks' }}" <<<"$concurrency_block"
+grep -Fq "cancel-in-progress: \${{ github.event_name == 'pull_request' }}" \
+  <<<"$concurrency_block"
 
 echo "master deployment freshness tests passed"
