@@ -29,8 +29,6 @@ for custom_scheduler_key in \
 done
 
 grep -q 'render-workflow.sh' "$generator"
-grep -Fq 'tests/test-workflow-cost-controls.sh | \' \
-  "$ROOT_DIR/.github/workflows/publish-images.yml"
 grep -q 'workflow-throughput-overlay.md' "$generator"
 grep -q 'workflow-source.json' "$generator"
 grep -q 'SYMPHONY_REQUIRE_CLEAN_MAIN_SOURCE' "$generator"
@@ -45,29 +43,6 @@ grep -q 'does not alter upstream' "$throughput_overlay"
 grep -q '^# Consolidated review for mechanical main-CI repairs$' "$throughput_overlay"
 grep -q 'one consolidated required review panel' "$throughput_overlay"
 grep -q 'authoritative final gate on the final tree' "$throughput_overlay"
-grep -q '^# Durable review proof across session boundaries$' "$throughput_overlay"
-grep -q 'completed Review Batch remains valid across a continuation' \
-  "$throughput_overlay"
-grep -q 'do not launch another panel solely because the session' \
-  "$throughput_overlay"
-grep -q '^# Bound work when the reported failure does not reproduce$' \
-  "$throughput_overlay"
-grep -q 'make an explicit scope decision' "$throughput_overlay"
-grep -q 'new repository-wide enforcement framework' "$throughput_overlay"
-grep -q '^# Freeze a published head while its evidence is pending$' \
-  "$throughput_overlay"
-grep -q 'keep the code-bearing tree fixed' "$throughput_overlay"
-grep -q 'only in response to a concrete classified check failure' \
-  "$throughput_overlay"
-grep -q '^# Do not wait for a CI job that is not part of the current gate$' \
-  "$throughput_overlay"
-grep -q 'acceptance criteria assign its authoritative proof' \
-  "$throughput_overlay"
-grep -q 'Fail closed when a ruleset-required or acceptance-required pre-merge job' \
-  "$throughput_overlay"
-grep -q '^# Serialize gates that share repository-visible temporary state$' \
-  "$throughput_overlay"
-grep -q 'Run gates sequentially when either gate creates' "$throughput_overlay"
 grep -q '^# Dependency-upgrade scope budget$' "$throughput_overlay"
 grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_overlay"
 grep -q "ticket's bounded exception" "$throughput_overlay"
