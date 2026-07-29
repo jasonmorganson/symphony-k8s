@@ -37,3 +37,16 @@ Do not silently turn a package update into a provider-tool migration. A ticket t
 allows a bounded exception authorizes the first choice; it does not by itself authorize broader
 replacement work. Preserve canonical review, compatibility, credential isolation, deployment, and
 final-gate requirements whichever choice is made.
+
+# Fresh remote proof in Merging
+
+On every entry into `Merging`, refresh the pull request target before making any current-main,
+staleness, or ancestry claim. Run an explicit authenticated fetch of the target branch from its
+remote, update the corresponding remote-tracking ref, and compare that freshly fetched ref with the
+pull request head. Do not rely on a workspace's pre-existing `origin/main`, a bootstrap snapshot, a
+cached pull-request base OID, or a prior turn's workpad claim.
+
+If the fresh target is not an ancestor of the pull request head, keep the issue in `Merging`, rebase
+the branch onto that target, run the required validation, push the repaired head, and continue the
+canonical land flow. Staleness alone never returns an authorized issue to `Human Review`. Record the
+exact fetched target SHA and the ancestry result in the durable workpad before landing.
