@@ -48,6 +48,13 @@ grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_ove
 grep -q "ticket's bounded exception" "$throughput_overlay"
 grep -q 'Do not silently turn a package update into a provider-tool migration' \
   "$throughput_overlay"
+grep -q '^# Retain Merging through post-merge verification$' "$throughput_overlay"
+grep -q 'Never move the issue from `Merging` to `In Progress`, `Human' \
+  "$throughput_overlay"
+grep -q 'containing-main proof has not completed yet' "$throughput_overlay"
+grep -q 'transition the issue directly from `Merging` to' "$throughput_overlay"
+grep -q 'keep the issue in `Merging` and follow the canonical failure-repair' \
+  "$throughput_overlay"
 if grep -q 'symphony_merge_writer\\|action.*acquire\\|action.*yield' "$throughput_overlay"; then
   echo "workflow overlay must not install custom merge serialization" >&2
   exit 1

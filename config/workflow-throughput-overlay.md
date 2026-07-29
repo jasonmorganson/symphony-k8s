@@ -125,3 +125,18 @@ If the fresh target is not an ancestor of the pull request head, keep the issue 
 the branch onto that target, run the required validation, push the repaired head, and continue the
 canonical land flow. Staleness alone never returns an authorized issue to `Human Review`. Record the
 exact fetched target SHA and the ancestry result in the durable workpad before landing.
+
+# Retain Merging through post-merge verification
+
+After the attached pull request is merged, keep the issue in `Merging` while required
+containing-main CI, deployment, or other post-merge proof is pending. A merged or closed pull
+request is evidence that landing occurred; it is not, by itself, evidence that implementation
+restarted or needs another review. Never move the issue from `Merging` to `In Progress`, `Human
+Review`, or `Rework` solely because the pull request is merged or closed, or because its required
+containing-main proof has not completed yet.
+
+When every required post-merge gate succeeds, transition the issue directly from `Merging` to
+`Done` using the canonical workflow-owned transition. When a required post-merge gate fails, keep
+the issue in `Merging` and follow the canonical failure-repair and completion semantics for that
+concrete failure; do not use the merged or closed pull-request state or a merely pending gate as a
+failure signal. This rule changes neither the required gates nor their fail-closed interpretation.
