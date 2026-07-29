@@ -15,13 +15,23 @@ bake_action='docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b'
 [[ "$(grep -Fc "$setup_buildx" "$workflow")" -eq 2 ]]
 [[ "$(grep -Fc "$bake_action" "$workflow")" -eq 2 ]]
 grep -Fq 'needs: [classify, test, deployment-plan]' <<<"$publish_job"
+grep -Fq "github.event_name != 'pull_request'" <<<"$publish_job"
+grep -Fq \
+  "|| 'production-doks'" "$workflow"
+# GitHub expressions are intentionally matched as literal workflow text.
+# shellcheck disable=SC2016
+grep -Fq \
+  'cancel-in-progress: ${{ github.event_name == '\''pull_request'\'' }}' \
+  "$workflow"
 [[ "$(grep -Fc 'load: true' "$workflow")" -eq 2 ]]
 grep -Fq 'run: bash tests/test-image-pipeline.sh' <<<"$test_job"
 grep -Fq "if: steps.image-targets.outputs.targets != ''" <<<"$test_job"
+# shellcheck disable=SC2016
 grep -Fq 'targets: ${{ steps.image-targets.outputs.targets }}' \
   <<<"$test_job"
 grep -Fq "if: steps.publish-image-targets.outputs.targets != ''" \
   <<<"$publish_job"
+# shellcheck disable=SC2016
 grep -Fq \
   'targets: ${{ steps.publish-image-targets.outputs.targets }}' \
   <<<"$publish_job"
@@ -32,14 +42,17 @@ for target in runtime-base release orchestrator worker autoscaler; do
   grep -Fq \
     "cache-from = [\"type=gha,scope=symphony-$target\"]" \
     "$bake_file"
-  grep -Fq \
-    "$target.cache-to=type=gha,mode=max,scope=symphony-$target" \
-    <<<"$test_job"
-  if grep -Fq "$target.cache-to=" <<<"$publish_job"; then
-    echo "publish job must read, but not export, the $target cache" >&2
+  if grep -Fq "$target.cache-to=" <<<"$test_job"; then
+    echo "PR validation must read, but not export, the $target cache" >&2
     exit 1
   fi
+  [[ "$(grep -Fc \
+    "$target.cache-to=type=gha,mode=max,scope=symphony-$target" \
+    <<<"$publish_job")" -eq 1 ]]
 done
+
+[[ "$(grep -Fc '.cache-to=type=gha,mode=max,scope=' <<<"$test_job")" -eq 0 ]]
+[[ "$(grep -Fc '.cache-to=type=gha,mode=max,scope=' <<<"$publish_job")" -eq 5 ]]
 
 grep -Fq 'runtime-base = "target:runtime-base"' "$bake_file"
 grep -Fq 'release      = "target:release"' "$bake_file"

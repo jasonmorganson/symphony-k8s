@@ -223,15 +223,10 @@ jobs:
           targets: ${{ steps.image-targets.outputs.targets }}
           set: |
             runtime-base.tags=symphony-runtime-base:test
-            runtime-base.cache-to=type=gha,mode=max,scope=symphony-runtime-base
             release.tags=symphony-release:test
-            release.cache-to=type=gha,mode=max,scope=symphony-release
             orchestrator.tags=symphony-orchestrator:test
-            orchestrator.cache-to=type=gha,mode=max,scope=symphony-orchestrator
             worker.tags=symphony-worker:test
-            worker.cache-to=type=gha,mode=max,scope=symphony-worker
             autoscaler.tags=symphony-autoscaler:test
-            autoscaler.cache-to=type=gha,mode=max,scope=symphony-autoscaler
       - name: Test worker authentication
         run: bash tests/test-worker-auth.sh
       - name: Test workspace bootstrap
@@ -315,11 +310,16 @@ jobs:
           targets: ${{ steps.publish-image-targets.outputs.targets }}
           set: |
             runtime-base.tags=symphony-runtime-base:do
+            runtime-base.cache-to=type=gha,mode=max,scope=symphony-runtime-base
             release.tags=symphony-release:do
+            release.cache-to=type=gha,mode=max,scope=symphony-release
             orchestrator.tags=ghcr.io/jasonmorganson/symphony-k8s-orchestrator:${{ github.sha }}
+            orchestrator.cache-to=type=gha,mode=max,scope=symphony-orchestrator
             worker.tags=ghcr.io/jasonmorganson/symphony-k8s-worker:${{ github.sha }}
             worker.tags=ghcr.io/jasonmorganson/symphony-k8s-worker:20260712-chatgpt
+            worker.cache-to=type=gha,mode=max,scope=symphony-worker
             autoscaler.tags=ghcr.io/jasonmorganson/symphony-k8s-autoscaler:${{ github.sha }}
+            autoscaler.cache-to=type=gha,mode=max,scope=symphony-autoscaler
       - name: Verify worker image
         if: needs.classify.outputs.worker == 'true'
         run: |
