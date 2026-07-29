@@ -215,7 +215,7 @@ fi
 
 if [[ "$*" == *" get statefulset symphony-worker "* ]] &&
     [[ "$*" == *'containers[?(@.name=="workspace-reclaimer")].image'* ]]; then
-  printf '%s' "${WORKER_DEPLOYED_IMAGE:-$WORKER_IMAGE}"
+  printf '%s' "${RECLAIMER_DEPLOYED_IMAGE:-${WORKER_DEPLOYED_IMAGE:-$WORKER_IMAGE}}"
   exit 0
 fi
 
@@ -452,7 +452,8 @@ grep -F "build worker_replicas=7" "$KUSTOMIZE_LOG"
 
 reset_logs
 preserved_worker_image="ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-WORKER_DEPLOYED_IMAGE="$preserved_worker_image" \
+WORKER_IMAGE="$preserved_worker_image" \
+  WORKER_DEPLOYED_IMAGE="$preserved_worker_image" \
   SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
 if grep -F -- "-n symphony delete pod/symphony-worker-" "$KUBECTL_LOG"; then
   echo "unchanged worker image must preserve active worker pods" >&2
@@ -460,12 +461,51 @@ if grep -F -- "-n symphony delete pod/symphony-worker-" "$KUBECTL_LOG"; then
 fi
 grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$preserved_worker_image" \
   "$KUSTOMIZE_LOG"
-if grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$WORKER_IMAGE" \
-    "$KUSTOMIZE_LOG"; then
-  echo "unchanged worker inputs must reuse the live immutable image" >&2
+grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+
+reset_logs
+SYMPHONY_REUSE_ORCHESTRATOR_IMAGE=true \
+  SYMPHONY_REUSE_AUTOSCALER_IMAGE=true \
+  SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
+if grep -F -- "-n symphony delete pod/symphony-worker-" "$KUBECTL_LOG"; then
+  echo "reused images must preserve active worker pods" >&2
   exit 1
 fi
-grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+
+reset_logs
+wrong_orchestrator_image="ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+if ORCHESTRATOR_DEPLOYED_IMAGE="$wrong_orchestrator_image" \
+    SYMPHONY_REUSE_ORCHESTRATOR_IMAGE=true run_deploy; then
+  echo "stale orchestrator reuse plan must fail deployment" >&2
+  exit 1
+fi
+[[ ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" && ! -s "$DRAIN_LOG" ]]
+
+reset_logs
+wrong_autoscaler_image="ghcr.io/jasonmorganson/symphony-k8s-autoscaler@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+if AUTOSCALER_DEPLOYED_IMAGE="$wrong_autoscaler_image" \
+    SYMPHONY_REUSE_AUTOSCALER_IMAGE=true run_deploy; then
+  echo "stale autoscaler reuse plan must fail deployment" >&2
+  exit 1
+fi
+[[ ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" && ! -s "$DRAIN_LOG" ]]
+
+reset_logs
+wrong_worker_image="ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+if WORKER_DEPLOYED_IMAGE="$wrong_worker_image" \
+    SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy; then
+  echo "stale worker reuse plan must fail deployment" >&2
+  exit 1
+fi
+[[ ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" && ! -s "$DRAIN_LOG" ]]
+
+reset_logs
+if RECLAIMER_DEPLOYED_IMAGE="$wrong_worker_image" \
+    SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy; then
+  echo "divergent worker sidecar images must fail deployment" >&2
+  exit 1
+fi
+[[ ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" && ! -s "$DRAIN_LOG" ]]
 
 reset_logs
 DOKS_REFRESH_KUBECONFIG=true run_deploy
@@ -656,6 +696,20 @@ fi
 reset_logs
 if SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=maybe run_deploy; then
   echo "invalid unchanged-worker restart policy must fail deployment" >&2
+  exit 1
+fi
+[[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" ]]
+
+reset_logs
+if SYMPHONY_REUSE_ORCHESTRATOR_IMAGE=maybe run_deploy; then
+  echo "invalid orchestrator reuse policy must fail deployment" >&2
+  exit 1
+fi
+[[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" ]]
+
+reset_logs
+if SYMPHONY_REUSE_AUTOSCALER_IMAGE=maybe run_deploy; then
+  echo "invalid autoscaler reuse policy must fail deployment" >&2
   exit 1
 fi
 [[ ! -s "$KUBECTL_LOG" && ! -s "$DOCTL_LOG" && ! -s "$KUSTOMIZE_LOG" ]]

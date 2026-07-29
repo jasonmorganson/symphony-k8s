@@ -17,7 +17,9 @@ DOKS_REFRESH_KUBECONFIG="${DOKS_REFRESH_KUBECONFIG:-false}"
 SYMPHONY_WAIT_FOR_IDLE="${SYMPHONY_WAIT_FOR_IDLE:-false}"
 SYMPHONY_IDLE_TIMEOUT_SECONDS="${SYMPHONY_IDLE_TIMEOUT_SECONDS:-14400}"
 SYMPHONY_IDLE_POLL_SECONDS="${SYMPHONY_IDLE_POLL_SECONDS:-30}"
+SYMPHONY_REUSE_ORCHESTRATOR_IMAGE="${SYMPHONY_REUSE_ORCHESTRATOR_IMAGE:-false}"
 SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART="${SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART:-false}"
+SYMPHONY_REUSE_AUTOSCALER_IMAGE="${SYMPHONY_REUSE_AUTOSCALER_IMAGE:-false}"
 SYMPHONY_STATE_PATH="${SYMPHONY_STATE_PATH:-/api/v1/namespaces/symphony/services/http:symphony-orchestrator:4000/proxy/api/v1/state}"
 SOURCE_REVISION="${SOURCE_REVISION:-}"
 ORCHESTRATOR_IMAGE="${ORCHESTRATOR_IMAGE:-}"
@@ -425,8 +427,12 @@ validate_rendered_manifest() {
 require_boolean DEPLOY_BOOTSTRAP_RUNTIME "$DEPLOY_BOOTSTRAP_RUNTIME"
 require_boolean DOKS_REFRESH_KUBECONFIG "$DOKS_REFRESH_KUBECONFIG"
 require_boolean SYMPHONY_WAIT_FOR_IDLE "$SYMPHONY_WAIT_FOR_IDLE"
+require_boolean SYMPHONY_REUSE_ORCHESTRATOR_IMAGE \
+  "$SYMPHONY_REUSE_ORCHESTRATOR_IMAGE"
 require_boolean SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART \
   "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART"
+require_boolean SYMPHONY_REUSE_AUTOSCALER_IMAGE \
+  "$SYMPHONY_REUSE_AUTOSCALER_IMAGE"
 require_nonnegative_integer SYMPHONY_WORKER_MIN_NODES "$WORKER_MIN_NODES"
 require_nonnegative_integer SYMPHONY_WORKER_MAX_NODES "$WORKER_MAX_NODES"
 require_storage_size SYMPHONY_WORKER_VOLUME_SIZE "$WORKER_VOLUME_SIZE"
@@ -464,7 +470,10 @@ required_addons=(coredns konnectivity-agent)
 optional_addons=(hubble-relay hubble-ui)
 addons=()
 live_worker_replicas=""
+live_orchestrator_image=""
 live_worker_image=""
+live_reclaimer_image=""
+live_autoscaler_image=""
 
 for deployment in "${required_addons[@]}"; do
   resource="$("$KUBECTL" -n kube-system get deployment "$deployment" --ignore-not-found -o name)"
@@ -482,16 +491,41 @@ for deployment in "${optional_addons[@]}"; do
 done
 
 if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
+  live_orchestrator_image="$("$KUBECTL" -n symphony get deployment \
+    symphony-orchestrator \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="orchestrator")].image}')"
   live_worker_replicas="$("$KUBECTL" -n symphony get statefulset symphony-worker \
     -o jsonpath='{.spec.replicas}')"
   require_nonnegative_integer "live Symphony worker replicas" "$live_worker_replicas"
   live_worker_image="$("$KUBECTL" -n symphony get statefulset symphony-worker \
     -o jsonpath='{.spec.template.spec.containers[?(@.name=="worker")].image}')"
+  live_reclaimer_image="$("$KUBECTL" -n symphony get statefulset symphony-worker \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="workspace-reclaimer")].image}')"
+  live_autoscaler_image="$("$KUBECTL" -n symphony get deployment \
+    symphony-autoscaler \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="autoscaler")].image}')"
+  if [[ "$SYMPHONY_REUSE_ORCHESTRATOR_IMAGE" == "true" ]]; then
+    validate_image "live orchestrator image" "$live_orchestrator_image" \
+      "ghcr.io/jasonmorganson/symphony-k8s-orchestrator"
+    [[ "$ORCHESTRATOR_IMAGE" == "$live_orchestrator_image" ]] ||
+      fail "planned orchestrator reuse no longer matches the live immutable image"
+    echo "orchestrator inputs are unchanged; preserving live image $ORCHESTRATOR_IMAGE"
+  fi
   if [[ "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART" == "true" ]]; then
     validate_image "live worker image" "$live_worker_image" \
       "ghcr.io/jasonmorganson/symphony-k8s-worker"
-    WORKER_IMAGE="$live_worker_image"
+    [[ "$live_reclaimer_image" == "$live_worker_image" ]] ||
+      fail "live worker and reclaimer images differ; refusing image reuse"
+    [[ "$WORKER_IMAGE" == "$live_worker_image" ]] ||
+      fail "planned worker reuse no longer matches the live immutable image"
     echo "worker inputs are unchanged; preserving live image $WORKER_IMAGE"
+  fi
+  if [[ "$SYMPHONY_REUSE_AUTOSCALER_IMAGE" == "true" ]]; then
+    validate_image "live autoscaler image" "$live_autoscaler_image" \
+      "ghcr.io/jasonmorganson/symphony-k8s-autoscaler"
+    [[ "$AUTOSCALER_IMAGE" == "$live_autoscaler_image" ]] ||
+      fail "planned autoscaler reuse no longer matches the live immutable image"
+    echo "autoscaler inputs are unchanged; preserving live image $AUTOSCALER_IMAGE"
   fi
 fi
 
