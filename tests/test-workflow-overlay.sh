@@ -83,6 +83,12 @@ grep -Fq 'Do not retry, edit code, or hold a review-ready issue' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Fail closed when a ruleset-required or acceptance-required pre-merge job' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Serialize gates that share repository-visible temporary state' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Run gates sequentially when either gate creates' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'orchestration interference, not a product finding' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'explicit scope-budget decision in the durable workpad' \
   "$TEMP_DIR/throughput-rendered.md"
@@ -122,6 +128,8 @@ grep -Fqx '# Bound work when the reported failure does not reproduce' \
 grep -Fqx '# Freeze a published head while its evidence is pending' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Do not wait for a CI job that is not part of the current gate' \
+  "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Serialize gates that share repository-visible temporary state' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/runtime-workflow.md"

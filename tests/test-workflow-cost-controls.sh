@@ -63,6 +63,9 @@ grep -q 'acceptance criteria assign its authoritative proof' \
   "$throughput_overlay"
 grep -q 'Fail closed when a ruleset-required or acceptance-required pre-merge job' \
   "$throughput_overlay"
+grep -q '^# Serialize gates that share repository-visible temporary state$' \
+  "$throughput_overlay"
+grep -q 'Run gates sequentially when either gate creates' "$throughput_overlay"
 grep -q '^# Dependency-upgrade scope budget$' "$throughput_overlay"
 grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_overlay"
 grep -q "ticket's bounded exception" "$throughput_overlay"

@@ -82,6 +82,21 @@ Fail closed when a ruleset-required or acceptance-required pre-merge job is unex
 skipped, stale, or ambiguous. This rule only distinguishes the designed proof stage; it never
 waives the required containing-main, deployment, or other later evidence.
 
+# Serialize gates that share repository-visible temporary state
+
+Before running independent final gates concurrently, verify that they are hermetic with respect to
+the checkout and every workspace path scanned by package, graph, generator, lockfile, or inventory
+discovery. Run gates sequentially when either gate creates, removes, or mutates repository-visible
+temporary proof workspaces, generated files, lockfiles, caches, or discovery inputs that the other
+gate can observe. A transient failure caused by one gate observing another gate's temporary state
+is orchestration interference, not a product finding; wait for cleanup and rerun the affected gates
+sequentially without expanding implementation scope.
+
+Prefer placing temporary proof workspaces outside the scanned repository graph when the canonical
+test supports it. Concurrency is still allowed for gates whose inputs and outputs are proven
+isolated. Record the isolation decision when parallel execution materially affects the completion
+timeline.
+
 # Dependency-upgrade scope budget
 
 Before a dependency upgrade expands into replacing a provider-facing development tool, record an
