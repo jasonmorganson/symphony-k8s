@@ -8,6 +8,9 @@ bake_file="$ROOT_DIR/docker-bake.hcl"
 test_job="$(sed -n '/^  test:$/,/^  publish:$/p' "$workflow")"
 publish_job="$(sed -n '/^  publish:$/,/^  deploy:$/p' "$workflow")"
 deploy_job="$(sed -n '/^  deploy:$/,$p' "$workflow")"
+control_plane_dockerfile="$ROOT_DIR/docker/control-plane/Dockerfile"
+worker_dockerfile="$ROOT_DIR/docker/worker/Dockerfile"
+autoscaler_dockerfile="$ROOT_DIR/docker/autoscaler/Dockerfile"
 
 setup_buildx='docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f'
 bake_action='docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b'
@@ -51,13 +54,40 @@ for target in runtime-base release orchestrator worker autoscaler; do
     <<<"$publish_job")" -eq 1 ]]
 done
 
+grep -Fq 'target "control-plane-build"' "$bake_file"
+grep -Fq \
+  'cache-from = ["type=gha,scope=symphony-control-plane-build"]' \
+  "$bake_file"
+if grep -Fq 'control-plane-build.cache-to=' <<<"$test_job"; then
+  echo "PR validation must not export the shared control-plane cache" >&2
+  exit 1
+fi
+[[ "$(grep -Fc \
+  'control-plane-build.cache-to=type=gha,mode=max,scope=symphony-control-plane-build' \
+  <<<"$publish_job")" -eq 1 ]]
+
 [[ "$(grep -Fc '.cache-to=type=gha,mode=max,scope=' <<<"$test_job")" -eq 0 ]]
-[[ "$(grep -Fc '.cache-to=type=gha,mode=max,scope=' <<<"$publish_job")" -eq 5 ]]
+[[ "$(grep -Fc '.cache-to=type=gha,mode=max,scope=' <<<"$publish_job")" -eq 6 ]]
 
 grep -Fq 'runtime-base = "target:runtime-base"' "$bake_file"
 grep -Fq 'release      = "target:release"' "$bake_file"
 grep -Fq 'RUNTIME_BASE           = "runtime-base"' "$bake_file"
 grep -Fq 'SYMPHONY_RELEASE_IMAGE = "release"' "$bake_file"
+[[ "$(grep -Fc 'control-plane-build = "target:control-plane-build"' "$bake_file")" -eq 2 ]]
+[[ "$(grep -Fc 'CONTROL_PLANE_BUILD = "control-plane-build"' "$bake_file")" -eq 2 ]]
+grep -Fq -- '--bin symphony-autoscaler' "$control_plane_dockerfile"
+grep -Fq -- '--bin symphony-workspace-reclaimer' "$control_plane_dockerfile"
+if grep -Fq 'cargo build' "$worker_dockerfile" ||
+    grep -Fq 'cargo build' "$autoscaler_dockerfile"; then
+  echo "final image Dockerfiles must reuse the shared control-plane build" >&2
+  exit 1
+fi
+grep -Fq \
+  'COPY --from=control-plane-build /src/target/release/symphony-workspace-reclaimer' \
+  "$worker_dockerfile"
+grep -Fq \
+  'COPY --from=control-plane-build /src/target/release/symphony-autoscaler' \
+  "$autoscaler_dockerfile"
 
 grep -Fq 'runtime-base.tags=symphony-runtime-base:test' <<<"$test_job"
 grep -Fq 'release.tags=symphony-release:test' <<<"$test_job"

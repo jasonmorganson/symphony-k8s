@@ -32,6 +32,11 @@ for path in "${paths[@]}"; do
       autoscaler=true
       reason+=("$path")
       ;;
+    docker/control-plane/*)
+      worker=true
+      autoscaler=true
+      reason+=("$path")
+      ;;
     docker/runtime-base/* | docker/common/*)
       orchestrator=true
       worker=true
