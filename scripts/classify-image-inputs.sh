@@ -43,7 +43,7 @@ for path in "${paths[@]}"; do
       reason+=("$path")
       ;;
     docker/release/* | docker/orchestrator/* | \
-    config/workflow-throughput-overlay.md)
+    config/workflow-runtime.yaml | config/workflow-throughput-overlay.md)
       orchestrator=true
       reason+=("$path")
       ;;
@@ -55,8 +55,7 @@ for path in "${paths[@]}"; do
       autoscaler=true
       reason+=("$path")
       ;;
-    README.md | .gitignore | k8s/* | tests/* | scripts/* | \
-    config/workflow-runtime.yaml)
+    README.md | .gitignore | k8s/* | tests/* | scripts/*)
       ;;
     *)
       force_all "unknown:$path"

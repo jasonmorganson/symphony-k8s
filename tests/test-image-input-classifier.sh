@@ -39,7 +39,7 @@ assert_flags \
 assert_flags \
   "orchestrator=true worker=false autoscaler=false" \
   docker/release/Dockerfile docker/orchestrator/entrypoint.sh \
-  config/workflow-throughput-overlay.md
+  config/workflow-runtime.yaml config/workflow-throughput-overlay.md
 assert_flags \
   "orchestrator=false worker=true autoscaler=false" \
   docker/worker/Dockerfile config/sshd_config.d/worker.conf
@@ -49,8 +49,7 @@ assert_flags \
 assert_flags \
   "orchestrator=false worker=false autoscaler=false" \
   README.md k8s/base/orchestrator-deployment.yaml \
-  scripts/deploy-digitalocean.sh tests/test-doks-deploy.sh \
-  config/workflow-runtime.yaml
+  scripts/deploy-digitalocean.sh tests/test-doks-deploy.sh
 
 assert_deployment_flags() {
   local expected="$1"

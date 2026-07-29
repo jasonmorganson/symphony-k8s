@@ -169,15 +169,37 @@ if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
 fi
 
 printf '%s\n' \
+  '---' \
+  'tracker:' \
+  '  active_states:' \
+  '    - Todo' \
+  '  observed_states:' \
+  '    - Human Review' \
+  'agent:' \
+  '  max_concurrent_agents: 1' \
+  '---' \
   '# Canonical workflow' \
   'Canonical instruction.' \
   '# DOKS Linear-read guard' \
   'Stale deployment overlay.' \
   > "$TEMP_DIR/mounted-workflow.md"
 "$ROOT_DIR/docker/orchestrator/materialize-runtime-workflow.sh" \
+  "$ROOT_DIR/config/workflow-runtime.yaml" \
   "$TEMP_DIR/mounted-workflow.md" \
   "$ROOT_DIR/config/workflow-throughput-overlay.md" \
   "$TEMP_DIR/runtime-workflow.md"
+[[ "$(grep -c '^tracker:$' "$TEMP_DIR/runtime-workflow.md")" == 1 ]]
+grep -A6 '^  active_states:$' "$TEMP_DIR/runtime-workflow.md" |
+  grep -Fq '    - Human Review'
+if grep -A5 '^  observed_states:$' "$TEMP_DIR/runtime-workflow.md" |
+    grep -Fq 'Human Review'; then
+  echo "runtime workflow must replace stale mounted tracker front matter" >&2
+  exit 1
+fi
+if grep -Fqx '  max_concurrent_agents: 1' "$TEMP_DIR/runtime-workflow.md"; then
+  echo "runtime workflow must not retain stale mounted runtime limits" >&2
+  exit 1
+fi
 grep -Fqx 'Canonical instruction.' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
   "$TEMP_DIR/runtime-workflow.md"
@@ -208,6 +230,8 @@ grep -Fq '/tmp/symphony-workflow/WORKFLOW.md' \
   "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
 grep -Fq 'materialize-runtime-workflow.sh' \
   "$ROOT_DIR/docker/orchestrator/entrypoint.sh"
+grep -Fq 'workflow-runtime.yaml' "$ROOT_DIR/docker/orchestrator/entrypoint.sh"
+grep -Fq 'config/workflow-runtime.yaml' "$ROOT_DIR/docker/orchestrator/Dockerfile"
 
 if "$ROOT_DIR/scripts/render-workflow.sh" \
     "$runtime" "$canonical" "$TEMP_DIR/missing.md" >/dev/null 2>&1; then

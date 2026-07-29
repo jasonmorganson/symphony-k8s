@@ -462,11 +462,15 @@ DEPLOY_BOOTSTRAP_RUNTIME=true bash scripts/deploy-digitalocean.sh
 rm -rf k8s/base/generated
 ```
 
-The generator retains the canonical `arrusted-development/WORKFLOW.md` prompt
-and appends `config/workflow-throughput-overlay.md`. Because the resulting
-`symphony-workflow` ConfigMap remains bootstrap-only, merging an overlay change
-does not mutate the live prompt. Regenerate and apply it only during an explicit
-idle workflow rotation after reviewing the generated `WORKFLOW.md`.
+The generated `symphony-workflow` ConfigMap remains the bootstrap-only source
+for the canonical `arrusted-development/WORKFLOW.md` prompt body. At every
+orchestrator startup, the image replaces mounted front matter with its versioned
+`config/workflow-runtime.yaml`, removes any stale mounted deployment overlay,
+and appends its versioned `config/workflow-throughput-overlay.md`. Runtime and
+overlay changes therefore follow the immutable orchestrator image through
+normal CD without mutating the bootstrap ConfigMap. Regenerate and apply that
+ConfigMap only during an explicit canonical prompt-body rotation after reviewing
+the generated `WORKFLOW.md`.
 
 The wrapper preflights the required DOKS add-ons, reconciles the `symphony-ha`
 pool to autoscaling bounds `0..10`, renders and validates in a temporary
