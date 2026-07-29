@@ -229,6 +229,11 @@ jobs:
             autoscaler.tags=symphony-autoscaler:test
       - name: Test worker authentication
         run: bash tests/test-worker-auth.sh
+      - name: Test worker image contract
+        run: bash tests/test-worker-image-contract.sh
+      - name: Smoke-test worker gate utilities
+        if: needs.classify.outputs.worker == 'true'
+        run: bash tests/test-worker-image-contract.sh symphony-worker:test
       - name: Test workspace bootstrap
         run: bash tests/test-workspace-bootstrap.sh
       - name: Test workflow cost controls

@@ -271,14 +271,6 @@ if grep -A8 'readinessProbe:' "${worker_manifests[0]}" | grep -q 'codex login st
   exit 1
 fi
 
-grep -q '^    gh \\' "$ROOT_DIR/docker/worker/Dockerfile"
-grep -q '^    jq \\' "$ROOT_DIR/docker/worker/Dockerfile"
-grep -q '^    unzip \\' "$ROOT_DIR/docker/worker/Dockerfile"
-grep -q '^    zip \\' "$ROOT_DIR/docker/worker/Dockerfile"
-grep -q 'gh --version' "$ROOT_DIR/docker/worker/Dockerfile"
-grep -q 'jq --version' "$ROOT_DIR/docker/worker/Dockerfile"
-grep -q 'unzip -v' "$ROOT_DIR/docker/worker/Dockerfile"
-grep -q 'zip --version' "$ROOT_DIR/docker/worker/Dockerfile"
 grep -q 'configure_github_auth' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'gh auth login --hostname github.com --git-protocol https --with-token' \
   "$ROOT_DIR/docker/worker/entrypoint.sh"
