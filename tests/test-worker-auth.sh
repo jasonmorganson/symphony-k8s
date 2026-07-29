@@ -286,6 +286,11 @@ grep -q 'ensure_codex_chatgpt_session' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'ensure_runtime_permissions' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'synchronize_codex_auth' "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'chown -R symphony:symphony' "$ROOT_DIR/docker/worker/entrypoint.sh"
+if grep -Fq 'chown -R symphony:symphony "$SYMPHONY_WORKSPACE_ROOT"' \
+  "$ROOT_DIR/docker/worker/entrypoint.sh"; then
+  echo "worker startup must not recursively chown the reclaimable workspace tree" >&2
+  exit 1
+fi
 grep -q 'Codex ChatGPT session could not complete an authenticated request' \
   "$ROOT_DIR/docker/worker/entrypoint.sh"
 grep -q 'if \[ ! -s /srv/worker-data/codex-home/auth.json \]; then' \
