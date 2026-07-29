@@ -102,6 +102,20 @@ grep -Fq 'Staleness alone never returns an authorized issue to `Human Review`' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'exact fetched target SHA and the ancestry result' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Retain Merging through post-merge verification' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'keep the issue in `Merging` while required' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Never move the issue from `Merging` to `In Progress`, `Human' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'containing-main proof has not completed yet' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'transition the issue directly from `Merging` to' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'When a required post-merge gate fails, keep' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'the issue in `Merging` and follow the canonical failure-repair' \
+  "$TEMP_DIR/throughput-rendered.md"
 if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
     "$TEMP_DIR/throughput-rendered.md"; then
   echo "throughput overlay must not serialize Merging work" >&2
@@ -133,6 +147,8 @@ grep -Fqx '# Serialize gates that share repository-visible temporary state' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Dependency-upgrade scope budget' "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Fresh remote proof in Merging' "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Retain Merging through post-merge verification' \
+  "$TEMP_DIR/runtime-workflow.md"
 if grep -Fq 'Stale deployment overlay.' "$TEMP_DIR/runtime-workflow.md"; then
   echo "runtime workflow must replace the stale mounted deployment overlay" >&2
   exit 1
