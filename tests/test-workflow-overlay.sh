@@ -80,6 +80,10 @@ grep -Fq 'non-interactive timeout of at most 90 seconds' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Skipped hosted CI on a draft pull request is not executable validation' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fq "Inspect the skipped job's checked workflow definition" \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'different broader gate is not a substitute' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Do not make a draft ready merely to cause CI to run' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Bound work when the reported failure does not reproduce' \

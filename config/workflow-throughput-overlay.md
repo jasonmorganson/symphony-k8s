@@ -196,9 +196,12 @@ inspect --logs`, a deployment log stream, or an equivalent provider probe runnin
 background across reasoning, continuation, or defer.
 
 Skipped hosted CI on a draft pull request is not executable validation. Keep the pull request
-draft and unmerged, run the repository's authoritative local equivalent on the exact published
-head, and record the command, head SHA, exit status, and concise result in durable issue or
-pull-request evidence. Do not make a draft ready merely to cause CI to run.
+draft and unmerged. Inspect the skipped job's checked workflow definition and reproduce its actual
+repository command, required environment, and arguments locally on the exact published head; a
+different broader gate is not a substitute unless the workflow itself invokes that gate with the
+same environment and arguments. Record the workflow job, command, head SHA, exit status, and
+concise result in durable issue or pull-request evidence.
+Do not make a draft ready merely to cause CI to run.
 
 # Dependency-upgrade scope budget
 
