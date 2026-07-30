@@ -20,6 +20,21 @@ For a real external blocker, use the canonical documented `Human Review` escape 
 required evidence. `Backlog` is reserved for newly created out-of-scope follow-up issues; it is not
 a parking state for work Symphony has already admitted.
 
+# Recover an explicitly stranded active issue
+
+If Symphony admits an existing issue whose current state is outside the configured active states,
+the operator has explicitly selected that issue for recovery; this is not general Backlog
+admission. Re-read the issue's current state and durable workpad. Only when they prove the issue was
+already active and was moved out of the active lane solely as an orchestration, review-freeze, or
+concurrency lock, restore it to its most recent appropriate active implementation state using the
+canonical workflow-owned Linear transition as the first action. Then continue from the existing
+workspace and exact published branch state.
+
+If the evidence instead shows a genuine unstarted Backlog issue, completed or canceled work, an
+ambiguous owner, or a real external blocker, do not transition or implement it. Report `defer` and
+leave the item unchanged for operator correction. Recovery never authorizes merge, provider
+mutation, relaxed exact-head gates, a new branch, or a competing writer.
+
 # Human Review maintenance lane
 
 Treat `Human Review` as an active maintenance lane, not as approval to resume product work. Inspect
