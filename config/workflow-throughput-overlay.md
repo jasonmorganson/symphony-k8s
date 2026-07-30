@@ -24,11 +24,16 @@ a parking state for work Symphony has already admitted.
 
 If Symphony admits an existing issue whose current state is outside the configured active states,
 the operator has explicitly selected that issue for recovery; this is not general Backlog
-admission. Re-read the issue's current state and durable workpad. Only when they prove the issue was
-already active and was moved out of the active lane solely as an orchestration, review-freeze, or
+admission. This recovery rule has higher precedence than every generic `Backlog -> stop`, `do not
+modify`, or `wait for human` rule elsewhere in this workflow. For an explicitly admitted recovery
+target, do not execute those generic Backlog routes.
+
+Re-read the issue's current state and durable workpad. Only when they prove the issue was already
+active and was moved out of the active lane solely as an orchestration, review-freeze, or
 concurrency lock, restore it to its most recent appropriate active implementation state using the
-canonical workflow-owned Linear transition as the first action. Then continue from the existing
-workspace and exact published branch state.
+canonical workflow-owned Linear transition as the first action. Do not end, yield, or defer the
+turn before attempting that transition. Then continue from the existing workspace and exact
+published branch state.
 
 If the evidence instead shows a genuine unstarted Backlog issue, completed or canceled work, an
 ambiguous owner, or a real external blocker, do not transition or implement it. Report `defer` and

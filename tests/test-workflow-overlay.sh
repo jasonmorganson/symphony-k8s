@@ -49,7 +49,13 @@ grep -Fq '`Backlog` is reserved for newly created out-of-scope follow-up issues'
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Recover an explicitly stranded active issue' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'This recovery rule has higher precedence than every generic `Backlog -> stop`' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'do not execute those generic Backlog routes' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'canonical workflow-owned Linear transition as the first action' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not end, yield, or defer the' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Recovery never authorizes merge, provider' \
   "$TEMP_DIR/throughput-rendered.md"
