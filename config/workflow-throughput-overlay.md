@@ -182,6 +182,24 @@ the exact command, result, and relevant failure or success signal in the workpad
 must never hide a nonzero exit, weaken a gate, omit a required test, or replace required uploaded
 artifacts. Use direct output for short, already-quiet commands.
 
+# Bound provider evidence probes
+
+Run repository-owned executable validation before optional provider-log inspection. A missing,
+failed, or inaccessible provider receipt remains a fail-closed acceptance blocker, but it must not
+suppress or delay the independent code gate for the exact pull-request head.
+
+Wrap provider CLIs and remote log streams in a non-interactive timeout of at most 90 seconds and
+write their bounded output to the task-scoped durable log. On timeout, terminate the entire probe
+process group. Record the provider evidence as unavailable with the exact command and
+exit status, and continue every independent local or hosted validation. Never leave `vercel
+inspect --logs`, a deployment log stream, or an equivalent provider probe running in the
+background across reasoning, continuation, or defer.
+
+Skipped hosted CI on a draft pull request is not executable validation. Keep the pull request
+draft and unmerged, run the repository's authoritative local equivalent on the exact published
+head, and record the command, head SHA, exit status, and concise result in durable issue or
+pull-request evidence. Do not make a draft ready merely to cause CI to run.
+
 # Dependency-upgrade scope budget
 
 Before a dependency upgrade expands into replacing a provider-facing development tool, record an

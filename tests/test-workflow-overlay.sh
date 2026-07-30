@@ -75,6 +75,13 @@ grep -Fq 'Fail closed and run the canonical required review again' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq "never satisfies or replaces the primary agent's authoritative final gate" \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Bound provider evidence probes' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'non-interactive timeout of at most 90 seconds' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Skipped hosted CI on a draft pull request is not executable validation' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Do not make a draft ready merely to cause CI to run' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Bound work when the reported failure does not reproduce' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'make an explicit scope decision' "$TEMP_DIR/throughput-rendered.md"
