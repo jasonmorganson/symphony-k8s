@@ -644,6 +644,10 @@ MUTATION_STARTED=1
   --max-nodes "$WORKER_MAX_NODES"
 
 APPLY_STARTED=1
+"$KUBECTL" -n symphony create configmap symphony-workflow-overlay \
+  --from-file="workflow-throughput-overlay.md=$ROOT_DIR/config/workflow-throughput-overlay.md" \
+  --dry-run=client -o yaml |
+  "$KUBECTL" apply -f -
 "$KUBECTL" apply -f "$rendered_manifest"
 reconcile_worker_volumes
 

@@ -31,6 +31,31 @@ spec:
                     app: symphony-worker
                 topologyKey: kubernetes.io/hostname
       initContainers:
+        - name: init-workflow-overlay
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              awk '
+                /^# DOKS Linear-read guard$/ { exit }
+                { print }
+              ' /workflow-source/WORKFLOW.md > /workflow-runtime/WORKFLOW.md
+              cat /workflow-overlay/workflow-throughput-overlay.md \
+                >> /workflow-runtime/WORKFLOW.md
+              chown 10001:10001 /workflow-runtime/WORKFLOW.md
+              chmod 0400 /workflow-runtime/WORKFLOW.md
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: workflow
+              mountPath: /workflow-source
+              readOnly: true
+            - name: workflow-overlay
+              mountPath: /workflow-overlay
+              readOnly: true
+            - name: workflow-runtime
+              mountPath: /workflow-runtime
         - name: init-orchestrator-workspaces
           image: busybox:1.36
           command:
@@ -120,8 +145,8 @@ spec:
             - name: SYMPHONY_EXTERNAL_WORKSPACE_RECLAIMER
               value: "true"
           volumeMounts:
-            - name: workflow
-              mountPath: /etc/symphony-workflow
+            - name: workflow-runtime
+              mountPath: /tmp/symphony-workflow
               readOnly: true
             - name: orchestrator-workspaces
               mountPath: /srv/symphony/workspaces
@@ -152,6 +177,14 @@ spec:
             items:
               - key: WORKFLOW.md
                 path: WORKFLOW.md
+        - name: workflow-overlay
+          configMap:
+            name: symphony-workflow-overlay
+            items:
+              - key: workflow-throughput-overlay.md
+                path: workflow-throughput-overlay.md
+        - name: workflow-runtime
+          emptyDir: {}
         - name: orchestrator-ssh
           emptyDir: {}
         - name: orchestrator-ssh-secret
