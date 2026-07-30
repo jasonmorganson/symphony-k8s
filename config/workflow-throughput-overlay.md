@@ -22,19 +22,30 @@ a parking state for work Symphony has already admitted.
 
 # Preserve explicit merge authority
 
-Merge authority is currently revoked deployment-wide. This explicit revocation has higher
-precedence than an issue state, a successful review, green checks, an issue description, or an
-earlier approval. Neither entering nor already being in `Merging` manufactures merge authority.
-Never merge, queue, enable auto-merge for, close, or approve any attached pull request until this
-deployment overlay is deliberately changed and redeployed.
+Merge authority is revoked by default deployment-wide. Symphony must not manufacture authority by
+transitioning an issue into `Merging`, and a successful review, green checks, an issue description,
+or an earlier approval does not override that default.
+
+An issue already in `Merging` when Symphony admits it is an explicit operator-authored,
+issue-specific grant of merge authority. This grant overrides the deployment default only for the
+single unambiguous pull request attached to that issue. Preserve the issue in `Merging`; never
+return it to `Human Review` solely because authority is revoked by default. Apply all canonical
+review, CI, deployment, credential-isolation, landing, and post-merge verification requirements.
+Do not extend this grant to another issue, a replacement pull request, or a different artifact.
 
 When final pre-merge evidence becomes green without merge authority, transition the issue to
 `Human Review` through the canonical workflow-owned Linear transition and defer. Do not transition
-it to `Merging`. If a workflow-owned turn previously moved the issue into `Merging` after authority
-was explicitly revoked, recover it to `Human Review` as the first action of the next turn, record
-the green head and the absent authority in the durable workpad, and defer. This recovery is not a
-review reset and does not authorize implementation changes, a replacement pull request, or a
-direct operator-owned Linear write.
+it to `Merging`. Leave the operator-owned transition as the only way to grant issue-specific merge
+authority while the deployment default remains revoked. Only when the durable workpad proves that
+Symphony itself created the current `Merging` transition may the next turn recover the issue to
+`Human Review`; absence of that proof means preserving the operator-authored grant. This boundary
+does not authorize implementation changes, a replacement pull request, or a direct operator-owned
+Linear write.
+
+After the authorized pull request merges, the post-merge reconciliation rules below take
+precedence: keep the issue in `Merging` until its required asynchronous verification reaches the
+canonical terminal or failure-repair outcome. Never re-evaluate the default authority revocation
+to bounce a merged issue to `Human Review`.
 
 # Recover an explicitly stranded active issue
 
