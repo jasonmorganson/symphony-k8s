@@ -146,10 +146,12 @@ if [[ "$*" == *"-n symphony get pods -l app=symphony-worker -o json"* ]]; then
   pod_count="${WORKER_POD_COUNT:-$replicas}"
   pending_ordinal="${WORKER_PENDING_ORDINAL:--1}"
   starting_ordinal="${WORKER_STARTING_ORDINAL:--1}"
+  crashloop_ordinal="${WORKER_CRASHLOOP_ORDINAL:--1}"
   jq -cn --arg image "$image" --arg digest "$digest" \
     --argjson pod_count "$pod_count" \
     --argjson pending_ordinal "$pending_ordinal" \
-    --argjson starting_ordinal "$starting_ordinal" '
+    --argjson starting_ordinal "$starting_ordinal" \
+    --argjson crashloop_ordinal "$crashloop_ordinal" '
     {items: [range(0; $pod_count) | {
       metadata: {name: ("symphony-worker-" + (. | tostring))},
       spec: {containers: [
@@ -157,6 +159,21 @@ if [[ "$*" == *"-n symphony get pods -l app=symphony-worker -o json"* ]]; then
         {name: "workspace-reclaimer", image: $image}
       ]},
       status: (if . == $pending_ordinal then {}
+      elif . == $crashloop_ordinal then {
+        conditions: [{type: "Ready", status: "False"}],
+        containerStatuses: [
+          {
+            name: "worker",
+            ready: false,
+            imageID: ("docker-pullable://worker@" + $digest)
+          },
+          {
+            name: "workspace-reclaimer",
+            ready: false,
+            imageID: ("docker-pullable://worker@" + $digest)
+          }
+        ]
+      }
       elif . == $starting_ordinal then {
         conditions: [{type: "Ready", status: "False"}],
         containerStatuses: [
@@ -509,6 +526,13 @@ WORKER_REPLICAS=3 \
   WORKER_STARTING_ORDINAL=2 \
   SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
 grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+
+reset_logs
+INITIAL_DRAINS_JSON='["worker-1"]' \
+  WORKER_CRASHLOOP_ORDINAL=1 \
+  SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
+grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+jq -se '.[-1].drained_worker_hosts == ["worker-1"]' "$DRAIN_LOG" >/dev/null
 
 reset_logs
 WORKER_REPLICAS=2 \
