@@ -103,6 +103,7 @@ grep -A1 'name: MAX_WORKERS' "$autoscaler" | grep -q 'value: "10"'
 grep -A1 'name: POLL_INTERVAL_SECONDS' "$autoscaler" | grep -q 'value: "15"'
 grep -A1 'name: SCALE_DOWN_STABILIZATION_SECONDS' "$autoscaler" | grep -q 'value: "90"'
 grep -A1 'name: DEMAND_MAX_AGE_SECONDS' "$autoscaler" | grep -q 'value: "300"'
+grep -A1 'name: RETRY_WARMUP_SECONDS' "$autoscaler" | grep -q 'value: "120"'
 grep -q 'path: /readyz' "$autoscaler"
 grep -q 'path: /healthz' "$autoscaler"
 if grep -q 'LINEAR_API_KEY\\|GITHUB_TOKEN\\|usage-ledger\\|requester-policy' "$autoscaler"; then

@@ -29,6 +29,7 @@ use prometheus_client::{
 use symphony_control_plane::{
     autoscaling::{
         AutoscalerConfig, DownscaleStabilizer, reconcile_plan, reconcile_plan_with_floor,
+        retry_needs_capacity,
     },
     env::{i64 as env_i64, string as env_string, u32 as env_u32, u64 as env_u64},
     kubernetes::{current_replicas, pod_ready, set_replicas},
@@ -224,6 +225,7 @@ impl Settings {
                 maximum,
                 agents_per_worker,
                 demand_max_age_seconds: env_i64("DEMAND_MAX_AGE_SECONDS", 300)?,
+                retry_warmup_seconds: env_i64("RETRY_WARMUP_SECONDS", 120)?,
                 statefulset,
             },
             symphony: SymphonyClient::new(
@@ -292,7 +294,12 @@ async fn reconcile(
         .set(i64::from(state.demand.eligible));
 
     let active_drained_hosts = if same_hosts(&state.worker_pool.drained_hosts, &plan.drains) {
-        active_drained_hosts(&state, &plan.drains)
+        active_drained_hosts(
+            &state,
+            &plan.drains,
+            now,
+            settings.autoscaler.retry_warmup_seconds,
+        )
     } else {
         settings
             .symphony
@@ -336,12 +343,19 @@ fn same_hosts(left: &[String], right: &[String]) -> bool {
 fn active_drained_hosts(
     state: &symphony_control_plane::symphony::SymphonyState,
     drains: &[String],
+    now: chrono::DateTime<Utc>,
+    retry_warmup_seconds: i64,
 ) -> Vec<String> {
     let drains = drains.iter().map(String::as_str).collect::<BTreeSet<_>>();
     state
         .running
         .iter()
-        .chain(&state.retrying)
+        .chain(
+            state
+                .retrying
+                .iter()
+                .filter(|entry| retry_needs_capacity(entry, now, retry_warmup_seconds)),
+        )
         .filter_map(|entry| entry.worker_host.as_deref())
         .filter(|host| drains.contains(host))
         .map(str::to_owned)
@@ -504,15 +518,18 @@ mod tests {
                 SessionEntry {
                     issue_identifier: Some("A-1".into()),
                     worker_host: Some("symphony-worker-1.workers".into()),
+                    due_at: None,
                 },
                 SessionEntry {
                     issue_identifier: Some("A-2".into()),
                     worker_host: Some("symphony-worker-2.workers".into()),
+                    due_at: None,
                 },
             ],
             retrying: vec![SessionEntry {
                 issue_identifier: Some("A-3".into()),
                 worker_host: Some("symphony-worker-3.workers".into()),
+                due_at: None,
             }],
             blocked: vec![],
         }
@@ -534,9 +551,24 @@ mod tests {
                 &[
                     "symphony-worker-2.workers".into(),
                     "symphony-worker-3.workers".into()
-                ]
+                ],
+                Utc::now(),
+                120,
             ),
             ["symphony-worker-2.workers", "symphony-worker-3.workers"]
+        );
+    }
+
+    #[test]
+    fn deferred_retry_outside_warmup_does_not_block_scale_down() {
+        let now = Utc::now();
+        let mut state = state();
+        state.running.clear();
+        state.retrying[0].due_at = Some(now + chrono::TimeDelta::minutes(8));
+
+        assert!(
+            active_drained_hosts(&state, &["symphony-worker-3.workers".into()], now, 120,)
+                .is_empty()
         );
     }
 

@@ -90,6 +90,8 @@ spec:
               value: "90"
             - name: DEMAND_MAX_AGE_SECONDS
               value: "300"
+            - name: RETRY_WARMUP_SECONDS
+              value: "120"
           ports:
             - name: metrics
               containerPort: 8080

@@ -36,6 +36,8 @@ pub struct WorkerPool {
 pub struct SessionEntry {
     pub issue_identifier: Option<String>,
     pub worker_host: Option<String>,
+    #[serde(default)]
+    pub due_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -228,6 +230,10 @@ mod tests {
         let state = client.state().await.unwrap();
         assert_eq!(state.demand.eligible, 3);
         assert_eq!(state.demand.observed_at, None);
+        assert_eq!(
+            state.retrying[0].due_at,
+            Some("2026-07-30T10:30:00Z".parse().unwrap())
+        );
 
         let acknowledgement = client
             .set_drains(&["symphony-worker-2".into()])
@@ -258,7 +264,11 @@ mod tests {
                 "available_slots": 2
             },
             "running": [],
-            "retrying": [],
+            "retrying": [{
+                "issue_identifier": "A-1",
+                "worker_host": "symphony-worker-1",
+                "due_at": "2026-07-30T10:30:00Z"
+            }],
             "blocked": []
         }))
     }

@@ -363,14 +363,17 @@ mod tests {
         active.running = vec![SessionEntry {
             issue_identifier: Some("A-1".into()),
             worker_host: None,
+            due_at: None,
         }];
         active.retrying = vec![SessionEntry {
             issue_identifier: Some("A-2".into()),
             worker_host: None,
+            due_at: None,
         }];
         active.blocked = vec![SessionEntry {
             issue_identifier: Some("A-3".into()),
             worker_host: None,
+            due_at: None,
         }];
         let issues = ["A-1", "A-2", "A-3"]
             .into_iter()
@@ -469,6 +472,7 @@ mod tests {
         uncertain.running.push(SessionEntry {
             issue_identifier: None,
             worker_host: None,
+            due_at: None,
         });
 
         assert!(matches!(
