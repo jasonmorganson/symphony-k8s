@@ -22,10 +22,11 @@ a parking state for work Symphony has already admitted.
 
 # Preserve explicit merge authority
 
-An explicit instruction that merge authority is absent or revoked has higher precedence than an
-issue state, a successful review, or green checks. Neither entering nor already being in `Merging`
-manufactures merge authority. While that instruction remains current, never merge, queue, enable
-auto-merge for, close, or approve the attached pull request.
+Merge authority is currently revoked deployment-wide. This explicit revocation has higher
+precedence than an issue state, a successful review, green checks, an issue description, or an
+earlier approval. Neither entering nor already being in `Merging` manufactures merge authority.
+Never merge, queue, enable auto-merge for, close, or approve any attached pull request until this
+deployment overlay is deliberately changed and redeployed.
 
 When final pre-merge evidence becomes green without merge authority, transition the issue to
 `Human Review` through the canonical workflow-owned Linear transition and defer. Do not transition

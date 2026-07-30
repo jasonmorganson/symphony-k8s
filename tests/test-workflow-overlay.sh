@@ -49,10 +49,19 @@ grep -Fq '`Backlog` is reserved for newly created out-of-scope follow-up issues'
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Preserve explicit merge authority' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Merge authority is currently revoked deployment-wide.' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Neither entering nor already being in `Merging`' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'recover it to `Human Review` as the first action of the next turn' \
   "$TEMP_DIR/throughput-rendered.md"
+
+grep -Fq 'symphony-workflow-overlay' \
+  "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
+grep -Fq '/workflow-overlay/workflow-throughput-overlay.md' \
+  "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
+grep -Fq 'create configmap symphony-workflow-overlay' \
+  "$ROOT_DIR/scripts/deploy-digitalocean.sh"
 grep -Fqx '# Recover an explicitly stranded active issue' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'This recovery rule has higher precedence than every generic `Backlog -> stop`' \
