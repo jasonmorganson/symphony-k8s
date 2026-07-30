@@ -47,6 +47,12 @@ grep -Fq 'Never move an existing active issue in `In Progress`, `Human Review`, 
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq '`Backlog` is reserved for newly created out-of-scope follow-up issues' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Recover an explicitly stranded active issue' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'canonical workflow-owned Linear transition as the first action' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Recovery never authorizes merge, provider' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'one consolidated required review panel' "$TEMP_DIR/throughput-rendered.md"
