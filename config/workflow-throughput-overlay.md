@@ -20,6 +20,21 @@ For a real external blocker, use the canonical documented `Human Review` escape 
 required evidence. `Backlog` is reserved for newly created out-of-scope follow-up issues; it is not
 a parking state for work Symphony has already admitted.
 
+# Preserve explicit merge authority
+
+An explicit instruction that merge authority is absent or revoked has higher precedence than an
+issue state, a successful review, or green checks. Neither entering nor already being in `Merging`
+manufactures merge authority. While that instruction remains current, never merge, queue, enable
+auto-merge for, close, or approve the attached pull request.
+
+When final pre-merge evidence becomes green without merge authority, transition the issue to
+`Human Review` through the canonical workflow-owned Linear transition and defer. Do not transition
+it to `Merging`. If a workflow-owned turn previously moved the issue into `Merging` after authority
+was explicitly revoked, recover it to `Human Review` as the first action of the next turn, record
+the green head and the absent authority in the durable workpad, and defer. This recovery is not a
+review reset and does not authorize implementation changes, a replacement pull request, or a
+direct operator-owned Linear write.
+
 # Recover an explicitly stranded active issue
 
 If Symphony admits an existing issue whose current state is outside the configured active states,
