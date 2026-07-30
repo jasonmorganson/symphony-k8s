@@ -86,6 +86,20 @@ grep -Fq 'Do not end, yield, or defer the' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Recovery never authorizes merge, provider' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Retire the removed Arrusted requester-policy contract' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'target repository has deliberately removed' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'higher precedence than the legacy' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'do not block PR creation because the mapping is absent' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'sole publication blocker' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'recover it to `In Progress` through the canonical' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'bounded publication recovery' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'one consolidated required review panel' "$TEMP_DIR/throughput-rendered.md"
