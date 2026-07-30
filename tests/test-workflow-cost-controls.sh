@@ -41,8 +41,12 @@ fi
 
 grep -q '^# DOKS Linear-read guard$' "$throughput_overlay"
 grep -q '^# Recover an explicitly stranded active issue$' "$throughput_overlay"
+grep -q 'This recovery rule has higher precedence than every generic `Backlog -> stop`' \
+  "$throughput_overlay"
+grep -q 'do not execute those generic Backlog routes' "$throughput_overlay"
 grep -q 'restore it to its most recent appropriate active implementation state using the' \
   "$throughput_overlay"
+grep -q 'Do not end, yield, or defer the' "$throughput_overlay"
 grep -q 'Recovery never authorizes merge, provider' "$throughput_overlay"
 grep -q 'finite page size of at most 25' "$throughput_overlay"
 grep -q 'does not alter upstream' "$throughput_overlay"
