@@ -240,6 +240,34 @@ EOF
 assert_sshd_identity_result complete success
 assert_sshd_identity_result incomplete failure
 
+original_workspace_root="$SYMPHONY_WORKSPACE_ROOT"
+guard_tmp="$(mktemp -d)"
+guard_root="$guard_tmp/guard-workspaces"
+mkdir -p \
+  "$guard_root/A-241/.git" \
+  "$guard_root/.reclaim-A-242-1/.git"
+guard_log="$guard_tmp/guard.log"
+runuser() {
+  printf '%s\n' "$*" >> "$guard_log"
+}
+SYMPHONY_WORKSPACE_ROOT="$guard_root"
+install_workspace_branch_guards
+grep -Fq "$guard_root/A-241" "$guard_log"
+if grep -Fq "$guard_root/.reclaim-A-242-1" "$guard_log"; then
+  echo "worker startup attempted to guard an internal reclaimer tombstone" >&2
+  exit 1
+fi
+
+mkdir -p "$guard_root/not-an-issue/.git"
+if install_workspace_branch_guards >/dev/null 2>&1; then
+  echo "worker startup accepted an unrelated Git workspace" >&2
+  exit 1
+fi
+rm -rf "$guard_root/not-an-issue"
+unset -f runuser
+rm -rf "$guard_tmp"
+SYMPHONY_WORKSPACE_ROOT="$original_workspace_root"
+
 unset GITHUB_TOKEN
 missing_rc=0
 missing_output="$(trim_secret GITHUB_TOKEN 2>&1)" || missing_rc=$?

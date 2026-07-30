@@ -146,6 +146,10 @@ async fn reclaim_once(
     metrics: &Metrics,
 ) -> Result<Vec<String>> {
     symphony.state().await?;
+    let recovered = reclaimer.recover_tombstones()?;
+    if recovered > 0 {
+        info!(recovered, "interrupted reclamation tombstones recovered");
+    }
     let directories = reclaimer.issue_directories()?;
     metrics
         .observed

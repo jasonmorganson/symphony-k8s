@@ -51,6 +51,7 @@ pub struct WorkspaceReclaimer {
     confirmations: u32,
     grace_seconds: i64,
     issue_directory: Regex,
+    reclamation_tombstone: Regex,
 }
 
 impl WorkspaceReclaimer {
@@ -96,7 +97,41 @@ impl WorkspaceReclaimer {
             confirmations: config.confirmations,
             grace_seconds: config.grace_seconds,
             issue_directory: Regex::new(r"^A-[1-9][0-9]*$").expect("static issue regex"),
+            reclamation_tombstone: Regex::new(r"^\.reclaim-A-[1-9][0-9]*-[1-9][0-9]*$")
+                .expect("static tombstone regex"),
         })
+    }
+
+    pub fn recover_tombstones(&self) -> Result<u64, ReclaimerError> {
+        let mut removed = 0;
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !self.reclamation_tombstone.is_match(&name) {
+                continue;
+            }
+
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                return Err(ReclaimerError::Symlink(entry.path().display().to_string()));
+            }
+            if !file_type.is_dir() {
+                return Err(ReclaimerError::InvalidRoot(format!(
+                    "{} is not a reclamation tombstone directory",
+                    entry.path().display()
+                )));
+            }
+
+            let resolved = entry.path().canonicalize()?;
+            if resolved.parent() != Some(self.root.as_path())
+                || resolved.file_name().and_then(|value| value.to_str()) != Some(name.as_str())
+            {
+                return Err(ReclaimerError::PathEscape(resolved.display().to_string()));
+            }
+            fs::remove_dir_all(resolved)?;
+            removed += 1;
+        }
+        Ok(removed)
     }
 
     pub fn issue_directories(&self) -> Result<BTreeMap<String, PathBuf>, ReclaimerError> {
@@ -125,6 +160,7 @@ impl WorkspaceReclaimer {
         terminal_states: &BTreeMap<String, TerminalIssueState>,
         now: DateTime<Utc>,
     ) -> Result<Vec<String>, ReclaimerError> {
+        self.recover_tombstones()?;
         let directories = self.issue_directories()?;
         self.reclaim_directories(symphony_state, terminal_states, directories, now)
     }
@@ -464,6 +500,52 @@ mod tests {
             Err(ReclaimerError::PathEscape(_))
         ));
         assert!(outside.exists());
+    }
+
+    #[test]
+    fn interrupted_reclamation_tombstones_are_recovered() {
+        let (_temporary, reclaimer) = fixture();
+        let workspace = workspace(&reclaimer, "A-23");
+        let tombstone = reclaimer.root.join(".reclaim-A-22-1");
+        fs::create_dir(&tombstone).unwrap();
+        fs::write(
+            tombstone.join("evidence"),
+            "remove after interrupted reclaim",
+        )
+        .unwrap();
+
+        assert!(
+            reclaimer
+                .reclaim(&state(), &BTreeMap::new(), Utc::now())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!tombstone.exists());
+        assert!(workspace.exists());
+    }
+
+    #[test]
+    fn reclamation_tombstone_symlinks_fail_closed() {
+        let (temporary, reclaimer) = fixture();
+        let outside = temporary.path().join("outside-tombstone");
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, reclaimer.root.join(".reclaim-A-24-1")).unwrap();
+
+        assert!(matches!(
+            reclaimer.recover_tombstones(),
+            Err(ReclaimerError::Symlink(path)) if path.contains(".reclaim-A-24-1")
+        ));
+        assert!(outside.exists());
+    }
+
+    #[test]
+    fn malformed_reclamation_tombstones_are_preserved() {
+        let (_temporary, reclaimer) = fixture();
+        let malformed = reclaimer.root.join(".reclaim-not-an-issue-1");
+        fs::create_dir(&malformed).unwrap();
+
+        assert_eq!(reclaimer.recover_tombstones().unwrap(), 0);
+        assert!(malformed.exists());
     }
 
     #[test]
