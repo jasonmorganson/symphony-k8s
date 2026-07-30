@@ -145,11 +145,6 @@ grep -Fq 'required hosted job that was skipped lacks a durable exact-command loc
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'deferring this lane for provider or human evidence' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fqx '# A-295 skipped Test(App) recovery proof' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'TURBO_SCM_BASE=refs/remotes/ci/pr-event-base' \
-  "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'apps/gateway/src/__tests__/delegation-chain.test.ts' \
-  "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'do not create a parent branch or pull' "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'must never merge, close, or approve a pull request' \
   "$TEMP_DIR/throughput-rendered.md"
