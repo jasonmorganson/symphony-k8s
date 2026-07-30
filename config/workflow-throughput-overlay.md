@@ -211,6 +211,25 @@ same environment and arguments. Record the workflow job, command, head SHA, exit
 concise result in durable issue or pull-request evidence.
 Do not make a draft ready merely to cause CI to run.
 
+# A-295 skipped Test(App) recovery proof
+
+While A-295's attached pull request 649 remains draft and its `Test(App)` job is skipped, do not
+defer the issue for provider or human evidence until the owning Symphony turn has executed the
+checked workflow's exact local equivalent on the current published branch head:
+
+```sh
+TURBO_SCM_BASE=refs/remotes/ci/pr-event-base \
+TURBO_SCM_HEAD=HEAD \
+mise run test:app --pr
+```
+
+Create or refresh `refs/remotes/ci/pr-event-base` from the pull request's checked base revision
+before running the command. Record the command, published head SHA, exit status, and
+`apps/gateway/src/__tests__/delegation-chain.test.ts` result in the durable workpad. If it fails,
+repair only that attached branch and rerun the same proof. Keep the pull request draft and
+unmerged, do not add exact-head enforcement, and retain the normal Human Review bounded defer
+after this independent proof is recorded.
+
 # Dependency-upgrade scope budget
 
 Before a dependency upgrade expands into replacing a provider-facing development tool, record an
