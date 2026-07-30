@@ -269,6 +269,14 @@ target-branch head or wait for an unrelated later run; subsequent commits cannot
 issue's already successful landing proof. Record both the frozen revision and its gate URLs in the
 durable workpad.
 
+If any required gate for the frozen revision is pending or has not started, do not hold the
+agent turn open with `gh run watch`, repeated status queries, shell sleep loops, background
+processes, or tool polling. Record the frozen revision, current gate URL and status in the durable
+workpad, keep the issue in `Merging`, and call `symphony_report_turn_outcome` with outcome `defer`
+as the final action. Because `Merging` remains an active tracker state, Symphony will revisit the
+issue on a later rate-limited turn and re-read the authoritative gate state. A pending gate is
+neither a failure nor an unowned terminal path.
+
 When every required post-merge gate succeeds, transition the issue directly from `Merging` to
 `Done` using the canonical workflow-owned transition. When a required post-merge gate fails, keep
 the issue in `Merging` and follow the canonical failure-repair and completion semantics for that
