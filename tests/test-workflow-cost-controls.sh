@@ -69,6 +69,9 @@ grep -q 'Skipped hosted CI on a draft pull request is not executable validation'
   "$throughput_overlay"
 grep -q "Inspect the skipped job's checked workflow definition" "$throughput_overlay"
 grep -q 'different broader gate is not a substitute' "$throughput_overlay"
+grep -q 'deferring this lane for provider or human evidence' "$throughput_overlay"
+grep -q 'required hosted job that was skipped lacks a durable exact-command local receipt' \
+  "$throughput_overlay"
 grep -q 'Do not make a draft ready merely to cause CI to run' "$throughput_overlay"
 grep -q '^# Dependency-upgrade scope budget$' "$throughput_overlay"
 grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_overlay"
