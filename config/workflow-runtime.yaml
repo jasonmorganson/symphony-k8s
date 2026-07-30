@@ -15,7 +15,8 @@ tracker:
     - Duplicate
     - Done
 polling:
-  interval_ms: 60000
+  interval_ms: 5000
+  request_interval_ms: 1500
 workspace:
   root: /srv/symphony/workspaces
 worker:
