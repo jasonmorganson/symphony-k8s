@@ -67,6 +67,8 @@ grep -q 'non-interactive timeout of at most 90 seconds' "$throughput_overlay"
 grep -q 'terminate the entire probe' "$throughput_overlay"
 grep -q 'Skipped hosted CI on a draft pull request is not executable validation' \
   "$throughput_overlay"
+grep -q "Inspect the skipped job's checked workflow definition" "$throughput_overlay"
+grep -q 'different broader gate is not a substitute' "$throughput_overlay"
 grep -q 'Do not make a draft ready merely to cause CI to run' "$throughput_overlay"
 grep -q '^# Dependency-upgrade scope budget$' "$throughput_overlay"
 grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_overlay"
