@@ -57,6 +57,9 @@ spec:
               mkdir -p /srv/worker-data/codex-home
               mkdir -p /srv/worker-data/local-home/share/mise
               mkdir -p /srv/worker-data/local-home/state/mise
+              mkdir -p /srv/worker-data/cache-home
+              mkdir -p /srv/worker-data/cargo-home
+              mkdir -p /srv/worker-data/bun-home
               if [ ! -s /srv/worker-data/codex-home/auth.json ]; then
                 cp /codex-auth/auth.json /srv/worker-data/codex-home/auth.json.next
                 chown 10001:10001 /srv/worker-data/codex-home/auth.json.next
@@ -66,6 +69,9 @@ spec:
               fi
               chown -R 10001:10001 /srv/worker-data/codex-home
               chown -R 10001:10001 /srv/worker-data/local-home
+              chown -R 10001:10001 /srv/worker-data/cache-home
+              chown -R 10001:10001 /srv/worker-data/cargo-home
+              chown -R 10001:10001 /srv/worker-data/bun-home
               chmod 0700 /srv/worker-data/codex-home
               chmod 0755 /srv/worker-data/local-home
               chmod 0600 /srv/worker-data/codex-home/auth.json
@@ -153,6 +159,15 @@ spec:
             - name: workspaces
               mountPath: /home/symphony/.local
               subPath: local-home
+            - name: workspaces
+              mountPath: /home/symphony/.cache
+              subPath: cache-home
+            - name: workspaces
+              mountPath: /home/symphony/.cargo
+              subPath: cargo-home
+            - name: workspaces
+              mountPath: /home/symphony/.bun
+              subPath: bun-home
             - name: worker-hostkeys
               mountPath: /etc/ssh/keys
               readOnly: true

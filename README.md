@@ -170,7 +170,10 @@ not replace an existing registry.
 ## Caveats
 
 - Stable SSH host keys are required. Do not rotate worker host keys without updating orchestrator `known_hosts`.
-- Workers need persistent volumes for reliable continuation turns.
+- Workers need persistent volumes for reliable continuation turns. Each
+  worker's PVC also retains its Git object mirror and package-manager download
+  directories; every issue still receives a fresh, independent checkout and
+  workspace-local installed dependencies.
 - Avoid a shared RWX workspace volume by default; use per-worker PVCs.
 - Workers fail closed unless the dedicated machine credential authenticates as
   `autograph-symphony` and can read `withAutograph/arrusted-development`.

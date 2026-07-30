@@ -20,8 +20,19 @@ if [[ "${FAIL_CLONE:-}" == 1 && "$1" == clone ]]; then
 fi
 if [[ "$1" == clone ]]; then
   target="${@: -1}"
+  printf 'git %s\n' "$*" >> "${BOOTSTRAP_LOG:?}"
+  if [[ " $* " == *" --mirror "* ]]; then
+    mkdir -p "$target/objects"
+    exit 0
+  fi
   mkdir -p "$target/.git" "$target/docs"
   touch "$target/AGENTS.md" "$target/WORKFLOW.md" "$target/docs/README.md"
+  exit 0
+fi
+if [[ "$1" == -C && "$3" == remote && "$4" == set-url ]]; then
+  exit 0
+fi
+if [[ "$1" == -C && "$3" == fetch ]]; then
   exit 0
 fi
 if [[ "$1" == -C && "$3" == remote && "$4" == get-url ]]; then
@@ -53,12 +64,16 @@ BRANCH_GUARD_INSTALLER="$fake_bin/branch-guard" \
 PATH="/usr/bin:/bin" \
 SKIP_WORKTRUNK_HOOKS=true \
 SYMPHONY_WORKSPACE_ROOT="$workspace_root" \
+SYMPHONY_REPOSITORY_CACHE="$tmp/cache/arrusted.git" \
   "$bootstrap" "$workspace_root/success"
 
 test -f "$workspace_root/success/AGENTS.md"
 grep -q '^mise trust \.$' "$tmp/bootstrap.log"
 grep -q '^mise install$' "$tmp/bootstrap.log"
 grep -Eq '^guard .*/workspaces/success$' "$tmp/bootstrap.log"
+grep -q '^git clone --mirror --filter=blob:none ' "$tmp/bootstrap.log"
+grep -q '^git clone --filter=blob:none --reference-if-able .*/cache/arrusted.git --dissociate ' \
+  "$tmp/bootstrap.log"
 
 rc=0
 FAIL_CLONE=1 \
@@ -69,6 +84,7 @@ BRANCH_GUARD_INSTALLER="$fake_bin/branch-guard" \
 PATH="/usr/bin:/bin" \
 SKIP_WORKTRUNK_HOOKS=true \
 SYMPHONY_WORKSPACE_ROOT="$workspace_root" \
+SYMPHONY_REPOSITORY_CACHE="$tmp/cache/arrusted.git" \
   "$bootstrap" "$workspace_root/failure" >/dev/null 2>&1 || rc=$?
 [[ "$rc" -eq 42 ]]
 [[ -z "$(find "$workspace_root/failure" -mindepth 1 -maxdepth 1 -print -quit)" ]]
