@@ -349,7 +349,13 @@ verify_worker_runtime_images() {
     --arg digest "$digest" \
     --argjson replicas "$replicas" \
     --argjson require_ready "$require_ready" '
-      [.items[] | select(.metadata.deletionTimestamp == null)] as $pods |
+      [range(0; $replicas) | "symphony-worker-\(.)"] as $expected_names |
+      [.items[] |
+        select(
+          .metadata.deletionTimestamp == null and
+          (.metadata.name as $name | $expected_names | index($name))
+        )
+      ] as $pods |
       ($pods | length) == $replicas and
       all($pods[];
         . as $pod |
@@ -359,7 +365,8 @@ verify_worker_runtime_images() {
             .name == $name and .image == $image)) and
         (
           ($require_ready == false and
-            (($pod.status.containerStatuses // []) | length) == 0) or
+            all(($pod.status.containerStatuses // [])[];
+              .ready == false and (.imageID // "") == "")) or
           (
             any($pod.status.conditions[]?;
               .type == "Ready" and .status == "True") and

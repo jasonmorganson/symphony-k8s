@@ -143,16 +143,27 @@ if [[ "$*" == *"-n symphony get pods -l app=symphony-worker -o json"* ]]; then
   image="${WORKER_RUNTIME_IMAGE:-$WORKER_IMAGE}"
   digest="${image##*@}"
   replicas="${WORKER_REPLICAS:-2}"
+  pod_count="${WORKER_POD_COUNT:-$replicas}"
   pending_ordinal="${WORKER_PENDING_ORDINAL:--1}"
+  starting_ordinal="${WORKER_STARTING_ORDINAL:--1}"
   jq -cn --arg image "$image" --arg digest "$digest" \
-    --argjson replicas "$replicas" --argjson pending_ordinal "$pending_ordinal" '
-    {items: [range(0; $replicas) | {
+    --argjson pod_count "$pod_count" \
+    --argjson pending_ordinal "$pending_ordinal" \
+    --argjson starting_ordinal "$starting_ordinal" '
+    {items: [range(0; $pod_count) | {
       metadata: {name: ("symphony-worker-" + (. | tostring))},
       spec: {containers: [
         {name: "worker", image: $image},
         {name: "workspace-reclaimer", image: $image}
       ]},
-      status: (if . == $pending_ordinal then {} else {
+      status: (if . == $pending_ordinal then {}
+      elif . == $starting_ordinal then {
+        conditions: [{type: "Ready", status: "False"}],
+        containerStatuses: [
+          {name: "worker", ready: false, imageID: ""},
+          {name: "workspace-reclaimer", ready: false, imageID: ""}
+        ]
+      } else {
         conditions: [{type: "Ready", status: "True"}],
         containerStatuses: [
           {
@@ -491,6 +502,18 @@ if grep -F -- "-n symphony delete pod/symphony-worker-" "$KUBECTL_LOG"; then
   echo "pending unchanged worker must not force active worker restarts" >&2
   exit 1
 fi
+grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+
+reset_logs
+WORKER_REPLICAS=3 \
+  WORKER_STARTING_ORDINAL=2 \
+  SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
+grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+
+reset_logs
+WORKER_REPLICAS=2 \
+  WORKER_POD_COUNT=3 \
+  SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
 grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
 
 reset_logs
