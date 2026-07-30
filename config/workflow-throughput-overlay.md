@@ -50,7 +50,8 @@ one of these concrete readiness defects:
 - the single unambiguous attached open pull request conflicts with or is stale against its freshly
   fetched target branch;
 - a required check or provider proof is failing, missing, or stale for the attached pull request;
-  or
+  a required hosted job that was skipped lacks a durable exact-command local receipt on the current
+  published head; or
 - the durable workpad or parent/child coordination record is stale relative to current pull-request,
   gate, or child-issue facts.
 
@@ -60,6 +61,13 @@ invalidated by the repair, then refresh the exact readiness evidence. For coordi
 issues, reconcile current facts in the existing workpad; do not create a parent branch or pull
 request. A merged or closed attached pull request is evidence to reconcile, not authorization to
 reopen it, create a successor, or perform more implementation.
+
+An unavailable provider receipt never makes an independent repository gate non-actionable. Before
+deferring this lane for provider or human evidence, execute and record every missing independent
+repository gate, including the exact workflow command, environment, and arguments for a required
+hosted job skipped because the pull request is draft. A broad aggregate gate does not satisfy that
+receipt unless the checked workflow invokes the same command with the same environment and
+arguments.
 
 This lane must never merge, close, or approve a pull request; infer, manufacture, dismiss, or replace
 human approval; transition the issue to `Merging`, `Done`, `In Progress`, `Rework`, or any other
