@@ -143,14 +143,16 @@ if [[ "$*" == *"-n symphony get pods -l app=symphony-worker -o json"* ]]; then
   image="${WORKER_RUNTIME_IMAGE:-$WORKER_IMAGE}"
   digest="${image##*@}"
   replicas="${WORKER_REPLICAS:-2}"
-  jq -cn --arg image "$image" --arg digest "$digest" --argjson replicas "$replicas" '
+  pending_ordinal="${WORKER_PENDING_ORDINAL:--1}"
+  jq -cn --arg image "$image" --arg digest "$digest" \
+    --argjson replicas "$replicas" --argjson pending_ordinal "$pending_ordinal" '
     {items: [range(0; $replicas) | {
       metadata: {name: ("symphony-worker-" + (. | tostring))},
       spec: {containers: [
         {name: "worker", image: $image},
         {name: "workspace-reclaimer", image: $image}
       ]},
-      status: {
+      status: (if . == $pending_ordinal then {} else {
         conditions: [{type: "Ready", status: "True"}],
         containerStatuses: [
           {
@@ -164,7 +166,7 @@ if [[ "$*" == *"-n symphony get pods -l app=symphony-worker -o json"* ]]; then
             imageID: ("docker-pullable://worker@" + $digest)
           }
         ]
-      }
+      } end)
     }]}'
   exit 0
 fi
@@ -479,6 +481,16 @@ if grep -F -- "-n symphony delete pod/symphony-worker-" "$KUBECTL_LOG"; then
 fi
 grep -F "nscr.io/k7qcltdhpncg0/symphony-k8s/worker=$preserved_worker_image" \
   "$KUSTOMIZE_LOG"
+grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
+
+reset_logs
+WORKER_REPLICAS=3 \
+  WORKER_PENDING_ORDINAL=2 \
+  SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART=true run_deploy
+if grep -F -- "-n symphony delete pod/symphony-worker-" "$KUBECTL_LOG"; then
+  echo "pending unchanged worker must not force active worker restarts" >&2
+  exit 1
+fi
 grep -F -- "-n symphony get pods -l app=symphony-worker -o json" "$KUBECTL_LOG"
 
 reset_logs

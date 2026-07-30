@@ -337,27 +337,39 @@ restart_worker_pods() {
 
 verify_worker_runtime_images() {
   local replicas="$1"
+  local require_ready="${2:-true}"
   local digest="${WORKER_IMAGE##*@}"
   local pods
+
+  require_boolean "worker runtime readiness requirement" "$require_ready"
 
   pods="$("$KUBECTL" -n symphony get pods -l app=symphony-worker -o json)"
   printf '%s' "$pods" | "$JQ" -e \
     --arg image "$WORKER_IMAGE" \
     --arg digest "$digest" \
-    --argjson replicas "$replicas" '
+    --argjson replicas "$replicas" \
+    --argjson require_ready "$require_ready" '
       [.items[] | select(.metadata.deletionTimestamp == null)] as $pods |
       ($pods | length) == $replicas and
       all($pods[];
         . as $pod |
-        any($pod.status.conditions[]?;
-          .type == "Ready" and .status == "True") and
         all(["worker", "workspace-reclaimer"][];
           . as $name |
           any($pod.spec.containers[];
-            .name == $name and .image == $image) and
-          any($pod.status.containerStatuses[]?;
-            .name == $name and .ready == true and
-            (.imageID | endswith($digest))))
+            .name == $name and .image == $image)) and
+        (
+          ($require_ready == false and
+            (($pod.status.containerStatuses // []) | length) == 0) or
+          (
+            any($pod.status.conditions[]?;
+              .type == "Ready" and .status == "True") and
+            all(["worker", "workspace-reclaimer"][];
+              . as $name |
+              any($pod.status.containerStatuses[]?;
+                .name == $name and .ready == true and
+                (.imageID | endswith($digest))))
+          )
+        )
       )' >/dev/null ||
     fail "worker runtime pods do not all use the requested immutable image"
 }
@@ -666,10 +678,11 @@ if (( image_override_count == 3 )); then
   if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
     if [[ "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART" == "true" ]]; then
       echo "worker image digest is unchanged; preserving active worker pods"
+      verify_worker_runtime_images "$live_worker_replicas" false
     else
       restart_worker_pods "$live_worker_replicas"
+      verify_worker_runtime_images "$live_worker_replicas"
     fi
-    verify_worker_runtime_images "$live_worker_replicas"
   fi
 fi
 
