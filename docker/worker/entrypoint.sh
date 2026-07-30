@@ -178,10 +178,18 @@ ensure_codex_chatgpt_session() {
 }
 
 install_workspace_branch_guards() {
-  local workspace
+  local issue_identifier workspace
 
   while IFS= read -r -d '' workspace; do
     if [[ -e "$workspace/.git" ]]; then
+      issue_identifier="$(basename "$workspace")"
+      if [[ "$issue_identifier" =~ ^\.reclaim-[A-Za-z]+-[0-9]+-[1-9][0-9]*$ ]]; then
+        continue
+      fi
+      if [[ ! "$issue_identifier" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
+        echo "refusing to guard a workspace without an issue identifier: $workspace" >&2
+        return 1
+      fi
       runuser -u symphony -- env \
         HOME="$SYMPHONY_HOME" \
         SYMPHONY_WORKSPACE_ROOT="$SYMPHONY_WORKSPACE_ROOT" \
