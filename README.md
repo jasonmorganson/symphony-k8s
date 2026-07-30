@@ -211,8 +211,10 @@ would add a separate monthly charge.
 The Rust `symphony-autoscaler` polls Symphony's existing state API every 15
 seconds. It makes no Linear or GitHub request and receives neither credential.
 Symphony reports eligible demand from candidate data already fetched by its
-normal poll. Desired replicas are
-`clamp(min, max, ceil(eligible / agents_per_worker))`, with bounds `0..10`.
+normal poll. Retries whose due time is more than two minutes away do not reserve
+warm capacity; their retained StatefulSet PVC and worker affinity remain
+available when they re-enter the warm-up window. Desired replicas are
+`clamp(min, max, ceil(warm_eligible / agents_per_worker))`, with bounds `0..10`.
 
 Scale-up keeps new ordinals drained, increases StatefulSet replicas, and
 watches worker pods with kube-rs. Ready workers are undrained on the next
@@ -222,7 +224,9 @@ The controller seeds that window with current capacity after restart and never
 uses historical demand to scale above current capacity. Once the window
 expires, scale-down drains the highest idle ordinals, requires Symphony to
 acknowledge that those workers host no active session, and only then reduces
-replicas. Any worker hosting a running session sets a hard capacity floor.
+replicas. Any worker hosting a running session or a retry inside the two-minute
+warm-up window sets a hard capacity floor. Missing retry timestamps fail closed
+by keeping capacity warm.
 
 Stale or malformed Symphony state, an inexact drain acknowledgement, a failed
 Kubernetes watch/relist, or any API error prohibits scale-down and retains

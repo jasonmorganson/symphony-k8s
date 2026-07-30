@@ -17,6 +17,7 @@ pub struct AutoscalerConfig {
     pub maximum: u32,
     pub agents_per_worker: u32,
     pub demand_max_age_seconds: i64,
+    pub retry_warmup_seconds: i64,
     pub statefulset: String,
 }
 
@@ -140,9 +141,10 @@ pub fn reconcile_plan_with_floor(
     }
 
     let active_floor = active_floor(state, config)?;
-    let required_host_floor = required_host_floor(state, config)?;
+    let required_host_floor = required_host_floor(state, now, config)?;
+    let capacity_demand = capacity_demand(state, now, config.retry_warmup_seconds);
     let desired = desired_workers(
-        state.demand.eligible,
+        capacity_demand,
         config.agents_per_worker,
         config.minimum,
         config.maximum,
@@ -173,18 +175,51 @@ pub fn reconcile_plan_with_floor(
     })
 }
 
-fn required_host_floor(state: &SymphonyState, config: &AutoscalerConfig) -> Result<u32, PlanError> {
+fn required_host_floor(
+    state: &SymphonyState,
+    now: DateTime<Utc>,
+    config: &AutoscalerConfig,
+) -> Result<u32, PlanError> {
     let configured_hosts = state
         .worker_pool
         .configured_hosts
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
+    if state
+        .worker_pool
+        .required_hosts
+        .iter()
+        .any(|host| !configured_hosts.contains(host.as_str()))
+    {
+        return Err(PlanError::MalformedState);
+    }
+
+    let warm_hosts = state
+        .running
+        .iter()
+        .chain(
+            state
+                .retrying
+                .iter()
+                .filter(|entry| retry_needs_capacity(entry, now, config.retry_warmup_seconds)),
+        )
+        .filter_map(|entry| entry.worker_host.as_deref())
+        .collect::<BTreeSet<_>>();
+    let deferred_hosts = state
+        .retrying
+        .iter()
+        .filter(|entry| !retry_needs_capacity(entry, now, config.retry_warmup_seconds))
+        .filter_map(|entry| entry.worker_host.as_deref())
+        .collect::<BTreeSet<_>>();
 
     state
         .worker_pool
         .required_hosts
         .iter()
+        .filter(|host| {
+            warm_hosts.contains(host.as_str()) || !deferred_hosts.contains(host.as_str())
+        })
         .try_fold(0, |floor, host| {
             if !configured_hosts.contains(host.as_str()) {
                 return Err(PlanError::MalformedState);
@@ -196,6 +231,32 @@ fn required_host_floor(state: &SymphonyState, config: &AutoscalerConfig) -> Resu
             }
             Ok(floor.max(host_floor))
         })
+}
+
+pub fn capacity_demand(
+    state: &SymphonyState,
+    now: DateTime<Utc>,
+    retry_warmup_seconds: i64,
+) -> u32 {
+    let deferred = state
+        .retrying
+        .iter()
+        .filter(|entry| !retry_needs_capacity(entry, now, retry_warmup_seconds))
+        .count();
+    state
+        .demand
+        .eligible
+        .saturating_sub(u32::try_from(deferred).unwrap_or(u32::MAX))
+}
+
+pub fn retry_needs_capacity(
+    entry: &crate::symphony::SessionEntry,
+    now: DateTime<Utc>,
+    retry_warmup_seconds: i64,
+) -> bool {
+    entry.due_at.is_none_or(|due_at| {
+        due_at <= now + chrono::TimeDelta::seconds(retry_warmup_seconds.max(0))
+    })
 }
 
 fn active_floor(state: &SymphonyState, config: &AutoscalerConfig) -> Result<u32, PlanError> {
@@ -279,6 +340,7 @@ mod tests {
             maximum: 10,
             agents_per_worker: 1,
             demand_max_age_seconds: 300,
+            retry_warmup_seconds: 120,
             statefulset: "symphony-worker".into(),
         }
     }
@@ -288,6 +350,72 @@ mod tests {
         assert_eq!(desired_workers(0, 2, 0, 10), 0);
         assert_eq!(desired_workers(3, 2, 0, 10), 2);
         assert_eq!(desired_workers(99, 1, 0, 10), 10);
+    }
+
+    #[test]
+    fn deferred_retries_outside_warmup_do_not_reserve_capacity() {
+        let now = Utc::now();
+        let mut state = state(3);
+        state.retrying = (0..3)
+            .map(|ordinal| crate::symphony::SessionEntry {
+                issue_identifier: Some(format!("A-{ordinal}")),
+                worker_host: Some(format!("symphony-worker-{ordinal}.workers")),
+                due_at: Some(now + TimeDelta::minutes(8)),
+            })
+            .collect();
+        state.worker_pool.required_hosts = (0..3)
+            .map(|ordinal| format!("symphony-worker-{ordinal}.workers"))
+            .collect();
+
+        assert_eq!(capacity_demand(&state, now, 120), 0);
+        let plan = reconcile_plan(&state, 3, &BTreeSet::new(), now, &config()).unwrap();
+        assert_eq!(plan.required_host_floor, 0);
+        assert_eq!(plan.desired, 0);
+        assert_eq!(plan.scale_to, Some(0));
+    }
+
+    #[test]
+    fn retries_entering_warmup_restore_exact_affinity_floor() {
+        let now = Utc::now();
+        let mut state = state(2);
+        state.retrying = vec![
+            crate::symphony::SessionEntry {
+                issue_identifier: Some("A-1".into()),
+                worker_host: Some("symphony-worker-1.workers".into()),
+                due_at: Some(now + TimeDelta::seconds(90)),
+            },
+            crate::symphony::SessionEntry {
+                issue_identifier: Some("A-7".into()),
+                worker_host: Some("symphony-worker-7.workers".into()),
+                due_at: Some(now + TimeDelta::minutes(8)),
+            },
+        ];
+        state.worker_pool.required_hosts = vec![
+            "symphony-worker-1.workers".into(),
+            "symphony-worker-7.workers".into(),
+        ];
+
+        assert_eq!(capacity_demand(&state, now, 120), 1);
+        let plan = reconcile_plan(&state, 0, &BTreeSet::new(), now, &config()).unwrap();
+        assert_eq!(plan.required_host_floor, 2);
+        assert_eq!(plan.desired, 2);
+    }
+
+    #[test]
+    fn missing_retry_due_time_fails_closed_and_keeps_capacity() {
+        let now = Utc::now();
+        let mut state = state(1);
+        state.retrying.push(crate::symphony::SessionEntry {
+            issue_identifier: Some("A-1".into()),
+            worker_host: Some("symphony-worker-3.workers".into()),
+            due_at: None,
+        });
+        state.worker_pool.required_hosts = vec!["symphony-worker-3.workers".into()];
+
+        assert_eq!(capacity_demand(&state, now, 120), 1);
+        let plan = reconcile_plan(&state, 0, &BTreeSet::new(), now, &config()).unwrap();
+        assert_eq!(plan.required_host_floor, 4);
+        assert_eq!(plan.desired, 4);
     }
 
     #[test]
@@ -341,6 +469,7 @@ mod tests {
         state.running.push(crate::symphony::SessionEntry {
             issue_identifier: Some("A-1".into()),
             worker_host: Some("symphony-worker-7.workers".into()),
+            due_at: None,
         });
         let ready = BTreeSet::new();
         let plan = reconcile_plan(&state, 8, &ready, Utc::now(), &config()).unwrap();
@@ -426,6 +555,7 @@ mod tests {
         state.running.push(crate::symphony::SessionEntry {
             issue_identifier: Some("A-1".into()),
             worker_host: Some("symphony-worker-7.workers".into()),
+            due_at: None,
         });
         let plan = reconcile_plan_with_floor(&state, 8, &BTreeSet::new(), Utc::now(), &config(), 3)
             .unwrap();
@@ -461,6 +591,7 @@ mod tests {
         state.running.push(crate::symphony::SessionEntry {
             issue_identifier: Some("A-1".into()),
             worker_host: None,
+            due_at: None,
         });
         assert_eq!(
             reconcile_plan(&state, 3, &BTreeSet::new(), Utc::now(), &config()),
@@ -484,6 +615,7 @@ mod tests {
         state.running.push(crate::symphony::SessionEntry {
             issue_identifier: Some("A-1".into()),
             worker_host: Some("symphony-worker-10.workers".into()),
+            due_at: None,
         });
         assert_eq!(
             reconcile_plan(&state, 3, &BTreeSet::new(), Utc::now(), &config()),
@@ -501,6 +633,7 @@ mod tests {
         state.running.push(crate::symphony::SessionEntry {
             issue_identifier: Some("A-1".into()),
             worker_host: Some(format!("symphony-worker-{}.workers", u32::MAX)),
+            due_at: None,
         });
         assert_eq!(
             reconcile_plan(&state, 3, &BTreeSet::new(), Utc::now(), &config()),
