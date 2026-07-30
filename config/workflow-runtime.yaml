@@ -2,8 +2,6 @@ tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
   project_slug: arrusted-development-71c3d9986f6d
-  recovery_issue_ids:
-    - c9582777-f0f5-4c8e-a8a2-b77718a7a7cf
   active_states:
     - Todo
     - In Progress

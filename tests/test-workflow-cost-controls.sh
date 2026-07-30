@@ -14,8 +14,10 @@ grep -q '^worker:$' "$runtime"
 grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$runtime"
 grep -q '^  max_concurrent_agents: 10$' "$runtime"
 grep -q '^  max_turns: 10$' "$runtime"
-grep -q '^  recovery_issue_ids:$' "$runtime"
-grep -q '^    - c9582777-f0f5-4c8e-a8a2-b77718a7a7cf$' "$runtime"
+if grep -q '^  recovery_issue_ids:' "$runtime"; then
+  echo "one-shot recovery targets must be removed after workflow-owned recovery" >&2
+  exit 1
+fi
 grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$runtime"
 [[ "$(grep -c '^    - symphony-worker-[0-9]' "$runtime")" -eq 10 ]]
 
