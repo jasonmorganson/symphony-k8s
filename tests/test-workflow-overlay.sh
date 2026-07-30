@@ -144,6 +144,12 @@ grep -Fq 'Never move the issue from `Merging` to `In Progress`, `Human' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'containing-main proof has not completed yet' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fq "Resolve and freeze the issue's containing-main revision" \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'do not advance the proof target to a newer' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq "subsequent commits cannot invalidate the" \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'transition the issue directly from `Merging` to' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'When a required post-merge gate fails, keep' \

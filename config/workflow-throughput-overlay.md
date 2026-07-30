@@ -212,6 +212,14 @@ restarted or needs another review. Never move the issue from `Merging` to `In Pr
 Review`, or `Rework` solely because the pull request is merged or closed, or because its required
 containing-main proof has not completed yet.
 
+Resolve and freeze the issue's containing-main revision from the attached pull request's merge
+commit (or, when the repository creates no merge commit, the first target-branch revision that
+contains the landed head). Required post-merge gates belong to that frozen revision. Once its
+required gates are terminal and successful, do not advance the proof target to a newer
+target-branch head or wait for an unrelated later run; subsequent commits cannot invalidate the
+issue's already successful landing proof. Record both the frozen revision and its gate URLs in the
+durable workpad.
+
 When every required post-merge gate succeeds, transition the issue directly from `Merging` to
 `Done` using the canonical workflow-owned transition. When a required post-merge gate fails, keep
 the issue in `Merging` and follow the canonical failure-repair and completion semantics for that
