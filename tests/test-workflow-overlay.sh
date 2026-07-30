@@ -47,6 +47,12 @@ grep -Fq 'Never move an existing active issue in `In Progress`, `Human Review`, 
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq '`Backlog` is reserved for newly created out-of-scope follow-up issues' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Preserve explicit merge authority' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Neither entering nor already being in `Merging`' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'recover it to `Human Review` as the first action of the next turn' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Recover an explicitly stranded active issue' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'This recovery rule has higher precedence than every generic `Backlog -> stop`' \
