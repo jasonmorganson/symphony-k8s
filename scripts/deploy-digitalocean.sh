@@ -338,25 +338,37 @@ restart_worker_pods() {
 verify_worker_runtime_images() {
   local replicas="$1"
   local require_ready="${2:-true}"
+  local excluded_hosts_json="${3:-[]}"
   local digest="${WORKER_IMAGE##*@}"
   local pods
 
   require_boolean "worker runtime readiness requirement" "$require_ready"
+  printf '%s' "$excluded_hosts_json" | "$JQ" -e '
+    type == "array" and length == (unique | length) and
+      all(.[]; type == "string" and length > 0)
+  ' >/dev/null ||
+    fail "worker runtime excluded hosts must be a unique string array"
 
   pods="$("$KUBECTL" -n symphony get pods -l app=symphony-worker -o json)"
   printf '%s' "$pods" | "$JQ" -e \
     --arg image "$WORKER_IMAGE" \
     --arg digest "$digest" \
+    --argjson excluded_hosts "$excluded_hosts_json" \
     --argjson replicas "$replicas" \
     --argjson require_ready "$require_ready" '
-      [range(0; $replicas) | "symphony-worker-\(.)"] as $expected_names |
+      [$excluded_hosts[] | split(".")[0] |
+        sub("^worker-"; "symphony-worker-")
+      ] as $excluded_names |
+      [range(0; $replicas) | "symphony-worker-\(.)" |
+        select(. as $name | $excluded_names | index($name) == null)
+      ] as $expected_names |
       [.items[] |
         select(
           .metadata.deletionTimestamp == null and
           (.metadata.name as $name | $expected_names | index($name))
         )
       ] as $pods |
-      ($pods | length) == $replicas and
+      ($pods | length) == ($expected_names | length) and
       all($pods[];
         . as $pod |
         all(["worker", "workspace-reclaimer"][];
@@ -689,7 +701,8 @@ if (( image_override_count == 3 )); then
   if [[ "$DEPLOY_BOOTSTRAP_RUNTIME" == "false" ]]; then
     if [[ "$SYMPHONY_SKIP_UNCHANGED_WORKER_RESTART" == "true" ]]; then
       echo "worker image digest is unchanged; preserving active worker pods"
-      verify_worker_runtime_images "$live_worker_replicas" false
+      verify_worker_runtime_images \
+        "$live_worker_replicas" false "$ORIGINAL_DRAINS_JSON"
     else
       restart_worker_pods "$live_worker_replicas"
       verify_worker_runtime_images "$live_worker_replicas"
