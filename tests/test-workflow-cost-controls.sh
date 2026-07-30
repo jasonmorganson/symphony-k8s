@@ -78,6 +78,13 @@ grep -q 'explicit scope-budget decision in the durable workpad' "$throughput_ove
 grep -q "ticket's bounded exception" "$throughput_overlay"
 grep -q 'Do not silently turn a package update into a provider-tool migration' \
   "$throughput_overlay"
+grep -q '^# Preserve explicit merge authority$' "$throughput_overlay"
+grep -q 'An issue already in `Merging` when Symphony admits it is an explicit operator-authored' \
+  "$throughput_overlay"
+grep -q 'single unambiguous pull request attached to that issue' "$throughput_overlay"
+grep -q 'Symphony must not manufacture authority' "$throughput_overlay"
+grep -q 'Only when the durable workpad proves that' "$throughput_overlay"
+grep -q 'Never re-evaluate the default authority revocation' "$throughput_overlay"
 grep -q '^# Retain Merging through post-merge verification$' "$throughput_overlay"
 grep -q 'Never move the issue from `Merging` to `In Progress`, `Human' \
   "$throughput_overlay"

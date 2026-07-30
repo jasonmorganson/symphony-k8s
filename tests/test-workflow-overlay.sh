@@ -49,11 +49,21 @@ grep -Fq '`Backlog` is reserved for newly created out-of-scope follow-up issues'
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Preserve explicit merge authority' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'Merge authority is currently revoked deployment-wide.' \
+grep -Fq 'Merge authority is revoked by default deployment-wide.' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'Neither entering nor already being in `Merging`' \
+grep -Fq 'Symphony must not manufacture authority by' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'recover it to `Human Review` as the first action of the next turn' \
+grep -Fq 'An issue already in `Merging` when Symphony admits it is an explicit operator-authored,' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'return it to `Human Review` solely because authority is revoked by default' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Leave the operator-owned transition as the only way to grant issue-specific merge' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Only when the durable workpad proves that' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'post-merge reconciliation rules below take' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Never re-evaluate the default authority revocation' \
   "$TEMP_DIR/throughput-rendered.md"
 
 grep -Fq 'symphony-workflow-overlay' \
