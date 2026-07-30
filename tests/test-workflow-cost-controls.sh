@@ -85,6 +85,10 @@ grep -q 'single unambiguous pull request attached to that issue' "$throughput_ov
 grep -q 'Symphony must not manufacture authority' "$throughput_overlay"
 grep -q 'Only when the durable workpad proves that' "$throughput_overlay"
 grep -q 'Never re-evaluate the default authority revocation' "$throughput_overlay"
+grep -q '^# Retire the removed Arrusted requester-policy contract$' "$throughput_overlay"
+grep -q 'do not block PR creation because the mapping is absent' "$throughput_overlay"
+grep -q 'recover it to `In Progress` through the canonical' "$throughput_overlay"
+grep -q 'bounded publication recovery' "$throughput_overlay"
 grep -q '^# Retain Merging through post-merge verification$' "$throughput_overlay"
 grep -q 'Never move the issue from `Merging` to `In Progress`, `Human' \
   "$throughput_overlay"

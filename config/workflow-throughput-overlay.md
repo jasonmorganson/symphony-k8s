@@ -67,6 +67,29 @@ ambiguous owner, or a real external blocker, do not transition or implement it. 
 leave the item unchanged for operator correction. Recovery never authorizes merge, provider
 mutation, relaxed exact-head gates, a new branch, or a competing writer.
 
+# Retire the removed Arrusted requester-policy contract
+
+For `withAutograph/arrusted-development`, the target repository has deliberately removed
+`.config/symphony/requester-policy.json`, its schema, mapped-requester approval handoff, and the
+associated PR-creation gate. This repository-specific rule has higher precedence than the legacy
+canonical machine-owned requester handoff. Do not require or recreate those deleted artifacts, do
+not guess a requester mapping, and do not block PR creation because the mapping is absent.
+
+Create or reuse the one issue-owned pull request from the canonical issue branch using the target
+repository's current PR conventions, attach it to the issue through the normal workflow-owned
+path, and preserve all current required checks, mergeability, resolved-conversation, branch
+ownership, credential-isolation, and manual `Merging` authorization requirements. Do not request a
+mapped-requester review or treat PR publication as merge authority.
+
+If an Arrusted issue is in `Human Review` with no attached pull request and its durable workpad
+proves that implementation, validation, commit, and push completed and the sole publication blocker
+was the removed requester-policy contract, recover it to `In Progress` through the canonical
+workflow-owned Linear transition as the first action. Resume the existing branch, synchronize it
+with current `main`, revalidate only what synchronization invalidates, create and attach its pull
+request, reconcile required checks and concrete feedback, and return it to `Human Review`. This is
+a bounded publication recovery, not authorization for new product scope, a replacement branch, or
+a merge.
+
 # Human Review maintenance lane
 
 Treat `Human Review` as an active maintenance lane, not as approval to resume product work. Inspect
