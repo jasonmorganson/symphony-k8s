@@ -59,6 +59,8 @@ grep -q '^# Retain Merging through post-merge verification$' "$throughput_overla
 grep -q 'Never move the issue from `Merging` to `In Progress`, `Human' \
   "$throughput_overlay"
 grep -q 'containing-main proof has not completed yet' "$throughput_overlay"
+grep -q "Resolve and freeze the issue's containing-main revision" "$throughput_overlay"
+grep -q 'do not advance the proof target to a newer' "$throughput_overlay"
 grep -q 'transition the issue directly from `Merging` to' "$throughput_overlay"
 grep -q 'When a required post-merge gate fails, keep' "$throughput_overlay"
 grep -q 'the issue in `Merging` and follow the canonical failure-repair' \
