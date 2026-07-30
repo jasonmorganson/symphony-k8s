@@ -60,6 +60,8 @@ grep -Fq 'symphony-workflow-overlay' \
   "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
 grep -Fq '/workflow-overlay/workflow-throughput-overlay.md' \
   "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
+grep -Fq 'mountPath: /etc/symphony-workflow' \
+  "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
 grep -Fq 'create configmap symphony-workflow-overlay' \
   "$ROOT_DIR/scripts/deploy-digitalocean.sh"
 grep -Fqx '# Recover an explicitly stranded active issue' \

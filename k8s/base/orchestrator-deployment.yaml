@@ -146,7 +146,7 @@ spec:
               value: "true"
           volumeMounts:
             - name: workflow-runtime
-              mountPath: /tmp/symphony-workflow
+              mountPath: /etc/symphony-workflow
               readOnly: true
             - name: orchestrator-workspaces
               mountPath: /srv/symphony/workspaces
