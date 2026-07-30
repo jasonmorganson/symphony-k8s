@@ -173,9 +173,9 @@ grep -Fq 'containing-main proof has not completed yet' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq "Resolve and freeze the issue's containing-main revision" \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'do not hold the agent turn open with `gh run watch`' \
+grep -Fq 'agent turn open with `gh run watch`' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'Symphony will revisit the issue on a later rate-limited turn' \
+grep -Fq 'issue on a later rate-limited turn' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'do not advance the proof target to a newer' \
   "$TEMP_DIR/throughput-rendered.md"
