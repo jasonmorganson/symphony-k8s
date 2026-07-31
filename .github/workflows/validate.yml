@@ -49,7 +49,7 @@ jobs:
         run: |
           bash scripts/verify-symphony-upstream.sh .validation/symphony "${{ steps.pins.outputs.symphony }}" "${{ steps.pins.outputs.symphony_upstream }}" config/symphony-production.patch
           cp config/symphony-production.patch "$RUNNER_TEMP/unapproved-symphony.patch"
-          printf '\n' >> "$RUNNER_TEMP/unapproved-symphony.patch"
+          sed -i 's/^+      SymphonyElixir.Linear.RateLimit,/+      SymphonyElixir.Linear.Unapproved,/' "$RUNNER_TEMP/unapproved-symphony.patch"
           if bash scripts/verify-symphony-upstream.sh .validation/symphony "${{ steps.pins.outputs.symphony }}" "${{ steps.pins.outputs.symphony_upstream }}" "$RUNNER_TEMP/unapproved-symphony.patch"; then
             echo "unapproved Symphony diff was accepted" >&2
             exit 1
