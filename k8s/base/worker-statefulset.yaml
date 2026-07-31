@@ -8,9 +8,9 @@ metadata:
 spec:
   serviceName: symphony-worker
   podManagementPolicy: Parallel
-  replicas: 1
+  replicas: 3
   updateStrategy:
-    type: RollingUpdate
+    type: OnDelete
   selector:
     matchLabels:
       app: symphony-worker
@@ -25,10 +25,77 @@ spec:
           type: RuntimeDefault
         fsGroup: 10001
         fsGroupChangePolicy: OnRootMismatch
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: symphony-worker
+              topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 75
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: symphony-orchestrator
+                topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: symphony-worker
       initContainers:
+        - name: init-workspace-permissions
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /srv/symphony/workspaces
+              mkdir -p /srv/worker-data/codex-home
+              mkdir -p /srv/worker-data/local-home/share/mise
+              mkdir -p /srv/worker-data/local-home/state/mise
+              mkdir -p /srv/worker-data/cache-home
+              mkdir -p /srv/worker-data/cargo-home
+              mkdir -p /srv/worker-data/bun-home
+              if [ ! -s /srv/worker-data/codex-home/auth.json ]; then
+                cp /codex-auth/auth.json /srv/worker-data/codex-home/auth.json.next
+                chown 10001:10001 /srv/worker-data/codex-home/auth.json.next
+                chmod 0600 /srv/worker-data/codex-home/auth.json.next
+                mv /srv/worker-data/codex-home/auth.json.next \
+                  /srv/worker-data/codex-home/auth.json
+              fi
+              chown -R 10001:10001 /srv/worker-data/codex-home
+              chown -R 10001:10001 /srv/worker-data/local-home
+              chown -R 10001:10001 /srv/worker-data/cache-home
+              chown -R 10001:10001 /srv/worker-data/cargo-home
+              chown -R 10001:10001 /srv/worker-data/bun-home
+              chmod 0700 /srv/worker-data/codex-home
+              chmod 0755 /srv/worker-data/local-home
+              chmod 0600 /srv/worker-data/codex-home/auth.json
+              chmod 2777 /srv/symphony/workspaces
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: workspaces
+              mountPath: /srv/symphony/workspaces
+            - name: workspaces
+              mountPath: /srv/worker-data
+            - name: codex-chatgpt-auth
+              mountPath: /codex-auth
+              readOnly: true
         - name: init-worker-hostkeys
           image: busybox:1.36
-          command: [sh, -c, "cp /ssh-src/* /ssh-dst/ && chmod 600 /ssh-dst/ssh_host_ed25519_key && chmod 644 /ssh-dst/ssh_host_ed25519_key.pub"]
+          command:
+            - sh
+            - -c
+            - |
+              cp /ssh-src/* /ssh-dst/
+              chmod 600 /ssh-dst/ssh_host_ed25519_key
+              chmod 644 /ssh-dst/ssh_host_ed25519_key.pub
+              chmod 755 /ssh-dst
           securityContext:
             runAsUser: 0
           volumeMounts:
@@ -44,26 +111,29 @@ spec:
           ports:
             - name: ssh
               containerPort: 22
-          startupProbe:
-            exec:
-              command: [sh, -c, "test -f /run/symphony-worker-ready"]
-            periodSeconds: 5
-            failureThreshold: 60
           readinessProbe:
             exec:
-              command: [sh, -c, "test -f /run/symphony-worker-ready"]
+              command:
+                - sh
+                - -c
+                - test -f /run/symphony-worker-ready
             periodSeconds: 10
+            timeoutSeconds: 5
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -f /run/symphony-worker-ready
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
           livenessProbe:
             tcpSocket:
               port: ssh
             periodSeconds: 30
+            failureThreshold: 3
           env:
-            - name: GITHUB_MACHINE_LOGIN
-              value: autograph-symphony
-            - name: GITHUB_MACHINE_NAME
-              value: autograph-symphony
-            - name: GITHUB_MACHINE_EMAIL
-              value: jason+symphony@withgraph.com
             - name: LINEAR_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -74,31 +144,30 @@ spec:
                 secretKeyRef:
                   name: github-machine-arrusted-symphony
                   key: token
-          resources:
-            requests:
-              cpu: "2"
-              memory: 4Gi
-            limits:
-              cpu: "4"
-              memory: 6Gi
+                  optional: false
           securityContext:
             allowPrivilegeEscalation: false
           volumeMounts:
             - name: workspaces
               mountPath: /srv/symphony/workspaces
-            - name: codex-home
+            - name: workspaces
               mountPath: /home/symphony/.codex
+              subPath: codex-home
             - name: codex-chatgpt-auth
               mountPath: /etc/symphony/codex-auth
               readOnly: true
-            - name: tool-state
+            - name: workspaces
               mountPath: /home/symphony/.local
-            - name: package-cache
+              subPath: local-home
+            - name: workspaces
               mountPath: /home/symphony/.cache
-            - name: cargo-cache
+              subPath: cache-home
+            - name: workspaces
               mountPath: /home/symphony/.cargo
-            - name: bun-cache
+              subPath: cargo-home
+            - name: workspaces
               mountPath: /home/symphony/.bun
+              subPath: bun-home
             - name: worker-hostkeys
               mountPath: /etc/ssh/keys
               readOnly: true
@@ -106,30 +175,84 @@ spec:
               mountPath: /etc/ssh/authorized-keys/authorized_keys
               subPath: authorized_keys
               readOnly: true
+        - name: workspace-reclaimer
+          image: symphony-worker
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/workspace-reclaimer
+          ports:
+            - name: reclaimer-http
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: reclaimer-http
+            periodSeconds: 60
+          env:
+            - name: SYMPHONY_WORKER_DRAIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: symphony-secrets
+                  key: SYMPHONY_WORKER_DRAIN_TOKEN
+            - name: SYMPHONY_STATE_URL
+              value: http://symphony-orchestrator:4000/api/v1/state
+            - name: WORKSPACE_RECLAIMER_INTERVAL_SECONDS
+              value: "600"
+            - name: WORKSPACE_RECLAIMER_GRACE_SECONDS
+              value: "3600"
+            - name: WORKSPACE_RECLAIMER_CONFIRMATIONS
+              value: "2"
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: workspaces
+              mountPath: /srv/symphony/workspaces
+            - name: workspaces
+              mountPath: /srv/worker-data
       volumes:
-        - name: workspaces
-          emptyDir: {}
-        - name: codex-home
-          emptyDir: {}
-        - name: tool-state
-          emptyDir: {}
-        - name: package-cache
-          emptyDir: {}
-        - name: cargo-cache
-          emptyDir: {}
-        - name: bun-cache
-          emptyDir: {}
         - name: codex-chatgpt-auth
           secret:
             secretName: codex-chatgpt-auth
             defaultMode: 0400
+            items:
+              - key: auth.json
+                path: auth.json
         - name: worker-hostkeys-secret
           secret:
             secretName: symphony-worker-hostkeys
             defaultMode: 0600
+            items:
+              - key: ssh_host_ed25519_key
+                path: ssh_host_ed25519_key
+              - key: ssh_host_ed25519_key.pub
+                path: ssh_host_ed25519_key.pub
         - name: worker-hostkeys
           emptyDir: {}
         - name: worker-authorized-keys
           secret:
             secretName: symphony-worker-authorized-keys
             defaultMode: 0400
+            items:
+              - key: authorized_keys
+                path: authorized_keys
+  volumeClaimTemplates:
+    - metadata:
+        name: workspaces
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
