@@ -238,15 +238,29 @@ pub fn capacity_demand(
     now: DateTime<Utc>,
     retry_warmup_seconds: i64,
 ) -> u32 {
-    let deferred = state
+    let warm_retrying = state
         .retrying
         .iter()
-        .filter(|entry| !retry_needs_capacity(entry, now, retry_warmup_seconds))
+        .filter(|entry| retry_needs_capacity(entry, now, retry_warmup_seconds))
         .count();
-    state
-        .demand
-        .eligible
-        .saturating_sub(u32::try_from(deferred).unwrap_or(u32::MAX))
+    let observed_demand = state.demand.eligible.saturating_sub(
+        u32::try_from(
+            state
+                .retrying
+                .iter()
+                .filter(|entry| !retry_needs_capacity(entry, now, retry_warmup_seconds))
+                .count(),
+        )
+        .unwrap_or(u32::MAX),
+    );
+
+    // A retry reservation is an imminent consumer of a worker slot, even when
+    // Linear's demand snapshot is one poll behind the orchestrator state. Keep
+    // the autoscaler floor at the number of live sessions plus warm retries so
+    // a queued eligible issue cannot be starved by an undercounted snapshot.
+    let live_floor = state.running.len().saturating_add(warm_retrying);
+
+    observed_demand.max(u32::try_from(live_floor).unwrap_or(u32::MAX))
 }
 
 pub fn retry_needs_capacity(
@@ -416,6 +430,29 @@ mod tests {
         let plan = reconcile_plan(&state, 0, &BTreeSet::new(), now, &config()).unwrap();
         assert_eq!(plan.required_host_floor, 4);
         assert_eq!(plan.desired, 4);
+    }
+
+    #[test]
+    fn live_sessions_and_warm_retries_raise_floor_when_demand_snapshot_lags() {
+        let now = Utc::now();
+        let mut state = state(0);
+        state.demand.eligible = 1;
+        state.running = (0..6)
+            .map(|ordinal| crate::symphony::SessionEntry {
+                issue_identifier: Some(format!("A-running-{ordinal}")),
+                worker_host: Some(format!("symphony-worker-{ordinal}.workers")),
+                due_at: None,
+            })
+            .collect();
+        state.retrying = (6..10)
+            .map(|ordinal| crate::symphony::SessionEntry {
+                issue_identifier: Some(format!("A-retry-{ordinal}")),
+                worker_host: Some(format!("symphony-worker-{ordinal}.workers")),
+                due_at: Some(now + TimeDelta::seconds(30)),
+            })
+            .collect();
+
+        assert_eq!(capacity_demand(&state, now, 120), 10);
     }
 
     #[test]
