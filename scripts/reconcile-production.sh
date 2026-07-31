@@ -50,6 +50,32 @@ apply_workflow() {
   workflow_applied=true
 }
 
+wait_for_worker_convergence() {
+  local state
+  for _ in {1..180}; do
+    state="$(kubectl -n "$namespace" get statefulset symphony-worker -o json)"
+    if ruby -rjson -e '
+      object=JSON.parse(STDIN.read)
+      metadata=object.fetch("metadata")
+      spec=object.fetch("spec")
+      status=object.fetch("status", {})
+      target=Integer(ARGV.fetch(0))
+      converged = status.fetch("observedGeneration", 0) >= metadata.fetch("generation") &&
+        spec.fetch("replicas") == target &&
+        status.fetch("replicas", 0) == target &&
+        status.fetch("readyReplicas", 0) == target &&
+        status.fetch("updatedReplicas", 0) == target &&
+        status["currentRevision"] == status["updateRevision"]
+      exit(converged ? 0 : 1)
+    ' "$target" <<<"$state"; then
+      return 0
+    fi
+    sleep 10
+  done
+  echo "worker StatefulSet did not converge to committed replicas and revision" >&2
+  return 1
+}
+
 # Server-side apply cannot remove list entries or resources that were created by
 # the retired deployment managers. Reconcile their absence explicitly before
 # changing capacity so the old autoscaler cannot fight the committed replica
@@ -111,6 +137,7 @@ if (( target > current )); then
   ruby "$repo_root/scripts/extract-resource.rb" "$temporary/production.yaml" StatefulSet symphony-worker "$temporary/workers.yaml"
   apply_committed "$temporary/workers.yaml"
   kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
+  wait_for_worker_convergence
   apply_workflow
 elif (( target < current )); then
   ruby "$repo_root/scripts/extract-resource.rb" "$temporary/production.yaml" StatefulSet symphony-worker "$temporary/workers-current.yaml" "$current"
@@ -139,6 +166,7 @@ fi
 [[ "$workflow_applied" == true ]] || apply_workflow
 apply_committed "$temporary/production.yaml"
 kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
+wait_for_worker_convergence
 kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=20m
 
 ready="$(kubectl -n "$namespace" get statefulset symphony-worker -o jsonpath='{.status.readyReplicas}')"

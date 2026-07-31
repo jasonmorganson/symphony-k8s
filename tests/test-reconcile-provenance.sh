@@ -41,6 +41,12 @@ grep -q -- 'unknown legacy worker volume claims; refusing recreation' \
 grep -q -- 'delete statefulset symphony-worker --cascade=orphan --wait=true' \
   "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'init-workspace-permissions' "$ROOT_DIR/scripts/reconcile-production.sh"
+[[ "$(grep -c 'wait_for_worker_convergence' "$ROOT_DIR/scripts/reconcile-production.sh")" == 3 ]] || {
+  echo "worker reconciliation does not consistently wait for actual convergence" >&2
+  exit 1
+}
+grep -q -- 'status\["currentRevision"\] == status\["updateRevision"\]' \
+  "$ROOT_DIR/scripts/reconcile-production.sh"
 
 updater_input="$tmpdir/updater-input.yaml"
 cp "$ROOT_DIR/environments/production/desired-state.yaml" "$updater_input"
