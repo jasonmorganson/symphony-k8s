@@ -24,6 +24,14 @@ if bash "$ROOT_DIR/scripts/reconcile-production.sh" \
 fi
 grep -q 'published images do not yet prove the desired Symphony revision' "$output"
 
+apply_count="$(grep -c 'kubectl apply --server-side' "$ROOT_DIR/scripts/reconcile-production.sh")"
+[[ "$apply_count" == 1 ]] || {
+  echo "production reconciliation bypasses the centralized GitOps field manager" >&2
+  exit 1
+}
+grep -q -- 'kubectl apply --server-side --force-conflicts --field-manager=symphony-gitops' \
+  "$ROOT_DIR/scripts/reconcile-production.sh"
+
 updater_input="$tmpdir/updater-input.yaml"
 cp "$ROOT_DIR/environments/production/desired-state.yaml" "$updater_input"
 ruby "$ROOT_DIR/scripts/update-image-digests.rb" \
