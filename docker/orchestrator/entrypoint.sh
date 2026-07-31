@@ -10,5 +10,29 @@ trim_secret() {
 }
 
 trim_secret LINEAR_API_KEY
+trim_secret OPENAI_API_KEY
+
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  trim_secret GITHUB_TOKEN
+  git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+  git config --global --add url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
+  git config --global --add url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+fi
+
+if ! codex login status >/dev/null 2>&1; then
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    printf '%s\n' "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null
+  else
+    echo "OPENAI_API_KEY is required for Codex login" >&2
+    exit 1
+  fi
+fi
+
+workflow_source="/etc/symphony-workflow/WORKFLOW.md"
+workflow_config="/app/config/workflow-runtime.yaml"
+workflow_overlay="/app/config/workflow-throughput-overlay.md"
+workflow_runtime="/tmp/symphony-workflow/WORKFLOW.md"
+materialize-runtime-workflow.sh \
+  "$workflow_config" "$workflow_source" "$workflow_overlay" "$workflow_runtime"
 
 exec /app/bin/symphony "$@"
