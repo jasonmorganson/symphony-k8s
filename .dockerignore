@@ -3,8 +3,3 @@
 !docker/**
 !config/
 !config/**
-!Cargo.toml
-!Cargo.lock
-!rust-toolchain.toml
-!rust/
-!rust/**
