@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mix local.hex --force && mix local.rebar --force
 
 ARG SYMPHONY_REPO=https://github.com/jasonmorganson/symphony.git
-ARG SYMPHONY_COMMIT=034d369bcf4e1631beba9cb6bc67d2544c767491
+ARG SYMPHONY_COMMIT=bebfcea85208df81d1692b868e79195e0ddad3fb
 RUN if [ ! -f mix.exs ]; then \
       git clone --filter=blob:none --no-checkout "${SYMPHONY_REPO}" /tmp/symphony-src && \
       git -C /tmp/symphony-src fetch --depth=1 origin "${SYMPHONY_COMMIT}" && \
@@ -37,8 +37,4 @@ WORKDIR /opt/symphony-src
 RUN mix deps.get --only prod
 RUN mix deps.compile
 RUN mix compile
-RUN mix release
-RUN rel_dir="$(find _build/prod/rel -mindepth 1 -maxdepth 1 -type d | head -n1)" \
-    && test -n "$rel_dir" \
-    && mkdir -p /release \
-    && cp -R "$rel_dir"/. /release/
+RUN mix run --no-start -e 'releases = Mix.Project.config() |> Keyword.fetch!(:releases); release = releases |> Keyword.fetch!(:symphony) |> Keyword.put(:steps, [:assemble]); Mix.ProjectStack.merge_config(releases: Keyword.put(releases, :symphony, release)); Mix.Task.run("release", ["symphony", "--overwrite", "--path", "/release"])'

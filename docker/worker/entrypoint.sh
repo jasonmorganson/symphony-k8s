@@ -3,10 +3,9 @@ set -euo pipefail
 
 SYMPHONY_HOME="${SYMPHONY_HOME:-/home/symphony}"
 SYMPHONY_WORKSPACE_ROOT="${SYMPHONY_WORKSPACE_ROOT:-/srv/symphony/workspaces}"
-ARRUSTED_REPOSITORY_URL="${ARRUSTED_REPOSITORY_URL:-https://github.com/withAutograph/arrusted-development.git}"
-GITHUB_MACHINE_LOGIN="autograph-symphony"
-GITHUB_MACHINE_NAME="autograph-symphony"
-GITHUB_MACHINE_EMAIL="jason+symphony@withgraph.com"
+GITHUB_MACHINE_LOGIN="${GITHUB_MACHINE_LOGIN:-}"
+GITHUB_MACHINE_NAME="${GITHUB_MACHINE_NAME:-symphony-worker}"
+GITHUB_MACHINE_EMAIL="${GITHUB_MACHINE_EMAIL:-symphony-worker@users.noreply.github.com}"
 CODEX_AUTH_SOURCE="${CODEX_AUTH_SOURCE:-/etc/symphony/codex-auth/auth.json}"
 
 trim_secret() {
@@ -79,21 +78,8 @@ configure_github_auth() {
   authenticated_login="$(runuser -u symphony -- \
     env -u GITHUB_TOKEN -u GH_TOKEN HOME="$SYMPHONY_HOME" \
     gh api user --jq .login)"
-  if [[ "$authenticated_login" != "$GITHUB_MACHINE_LOGIN" ]]; then
+  if [[ -n "$GITHUB_MACHINE_LOGIN" && "$authenticated_login" != "$GITHUB_MACHINE_LOGIN" ]]; then
     echo "GitHub credential is not the required Symphony machine identity" >&2
-    return 1
-  fi
-
-  if ! runuser -u symphony -- \
-    env -u GITHUB_TOKEN -u GH_TOKEN HOME="$SYMPHONY_HOME" \
-    gh repo view withAutograph/arrusted-development \
-      --json nameWithOwner --jq .nameWithOwner >/dev/null; then
-    echo "GitHub machine credential cannot access the required repository" >&2
-    return 1
-  fi
-  if ! runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
-    git ls-remote --exit-code "$ARRUSTED_REPOSITORY_URL" HEAD >/dev/null; then
-    echo "Git HTTPS cannot access the required repository" >&2
     return 1
   fi
 
@@ -177,27 +163,6 @@ ensure_codex_chatgpt_session() {
   verify_codex_chatgpt_session
 }
 
-install_workspace_branch_guards() {
-  local issue_identifier workspace
-
-  while IFS= read -r -d '' workspace; do
-    if [[ -e "$workspace/.git" ]]; then
-      issue_identifier="$(basename "$workspace")"
-      if [[ "$issue_identifier" =~ ^\.reclaim-[A-Za-z]+-[0-9]+-[1-9][0-9]*$ ]]; then
-        continue
-      fi
-      if [[ ! "$issue_identifier" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
-        echo "refusing to guard a workspace without an issue identifier: $workspace" >&2
-        return 1
-      fi
-      runuser -u symphony -- env \
-        HOME="$SYMPHONY_HOME" \
-        SYMPHONY_WORKSPACE_ROOT="$SYMPHONY_WORKSPACE_ROOT" \
-        /usr/local/bin/install-workspace-branch-guard "$workspace"
-    fi
-  done < <(find "$SYMPHONY_WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -print0)
-}
-
 main() {
 trim_secret LINEAR_API_KEY
 verify_required_commands
@@ -210,8 +175,6 @@ mkdir -p "$SYMPHONY_WORKSPACE_ROOT" "$SYMPHONY_HOME/.ssh" /run/sshd
 chown symphony:symphony "$SYMPHONY_WORKSPACE_ROOT"
 chmod 0777 "$SYMPHONY_WORKSPACE_ROOT"
 chown symphony:symphony "$SYMPHONY_HOME" "$SYMPHONY_HOME/.ssh"
-install_workspace_branch_guards
-
 if [[ -f /etc/ssh/authorized-keys/authorized_keys ]]; then
   cp /etc/ssh/authorized-keys/authorized_keys "$SYMPHONY_HOME/.ssh/authorized_keys"
   chown symphony:symphony "$SYMPHONY_HOME/.ssh/authorized_keys"
