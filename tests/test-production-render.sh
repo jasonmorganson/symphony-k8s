@@ -22,6 +22,9 @@ ruby -ryaml -e '
   front=YAML.safe_load(cm.dig("data","WORKFLOW.md").split("---\n",3)[1])
   abort "host drift" unless front.dig("worker","ssh_hosts").length == replicas
   abort "capacity drift" unless front.dig("agent","max_concurrent_agents") == replicas
+  abort "poll interval drift" unless front.dig("polling","interval_ms") == 15_000
+  abort "request pacing drift" unless front.dig("polling","request_interval_ms") == 2_500
+  abort "Human Review must remain active" unless front.dig("tracker","active_states").include?("Human Review")
   tunnel=cloudflared.dig("spec","template","spec","containers").find { |c| c["name"] == "cloudflared" }.fetch("env").find { |e| e["name"] == "TUNNEL_TOKEN" }
   abort "networking secret drift" unless tunnel.dig("valueFrom","secretKeyRef","name") == desired.dig("spec","networking","cloudflare_tunnel_secret")
   abort "fork provenance drift" unless cm.dig("metadata","annotations","symphony.morganson.me/symphony-revision") == desired.dig("spec","symphony","revision")

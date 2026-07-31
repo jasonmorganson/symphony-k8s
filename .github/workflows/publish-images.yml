@@ -11,6 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   packages: write
   pull-requests: write
@@ -85,3 +86,4 @@ jobs:
           git commit -m "Pin immutable Symphony images"
           git push origin "$branch"
           gh pr create --base master --head "$branch" --title "Pin immutable Symphony images" --body "Pins images built from Symphony $SYMPHONY_REVISION. Production reconciliation remains blocked until this reviewed desired-state change merges."
+          gh workflow run validate.yml --ref "$branch"

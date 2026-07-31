@@ -1,0 +1,462 @@
+diff --git a/elixir/lib/symphony_elixir.ex b/elixir/lib/symphony_elixir.ex
+index a08b63e624323df4ecce122edaf63b7a308215e5..81d08004e231563af620363f08d8d54ee77e2c7c 100644
+--- a/elixir/lib/symphony_elixir.ex
++++ b/elixir/lib/symphony_elixir.ex
+@@ -37,6 +37,7 @@ defmodule SymphonyElixir.Application do
+ 
+     children = [
+       {Phoenix.PubSub, name: SymphonyElixir.PubSub},
++      SymphonyElixir.Linear.RateLimit,
+       SymphonyElixir.WorkflowStore,
+       SymphonyElixir.AgentRuntimeSupervisor,
+       SymphonyElixir.HttpServer,
+diff --git a/elixir/lib/symphony_elixir/config/schema.ex b/elixir/lib/symphony_elixir/config/schema.ex
+index 6ebb278faca9e9e112058fb0817e6a7aa1201214..0628eae2d6f5bd0b30fb9cb5746cb8065baf11a4 100644
+--- a/elixir/lib/symphony_elixir/config/schema.ex
++++ b/elixir/lib/symphony_elixir/config/schema.ex
+@@ -94,13 +94,15 @@ defmodule SymphonyElixir.Config.Schema do
+     @primary_key false
+     embedded_schema do
+       field(:interval_ms, :integer, default: 30_000)
++      field(:request_interval_ms, :integer, default: 1_500)
+     end
+ 
+     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+     def changeset(schema, attrs) do
+       schema
+-      |> cast(attrs, [:interval_ms], empty_values: [])
++      |> cast(attrs, [:interval_ms, :request_interval_ms], empty_values: [])
+       |> validate_number(:interval_ms, greater_than: 0)
++      |> validate_number(:request_interval_ms, greater_than_or_equal_to: 0)
+     end
+   end
+ 
+diff --git a/elixir/lib/symphony_elixir/linear/client.ex b/elixir/lib/symphony_elixir/linear/client.ex
+index fb32b6078f0ad81c24685a6940b6fa63429acd23..95167bf2d88c5db6c7d998950f2b6770db984811 100644
+--- a/elixir/lib/symphony_elixir/linear/client.ex
++++ b/elixir/lib/symphony_elixir/linear/client.ex
+@@ -5,6 +5,7 @@ defmodule SymphonyElixir.Linear.Client do
+ 
+   require Logger
+   alias SymphonyElixir.Config
++  alias SymphonyElixir.Linear.RateLimit
+   alias SymphonyElixir.Tracker.Issue
+ 
+   @issue_page_size 50
+@@ -141,6 +142,12 @@ defmodule SymphonyElixir.Linear.Client do
+       when is_binary(query) and is_map(variables) and is_list(opts) do
+     payload = build_graphql_payload(query, variables, Keyword.get(opts, :operation_name))
+     tracker_settings = Keyword.get_lazy(opts, :tracker_settings, fn -> Config.settings!().tracker end)
++    rate_limit_server = Keyword.get(opts, :rate_limit_server, RateLimit)
++
++    request_interval_ms =
++      Keyword.get_lazy(opts, :request_interval_ms, fn ->
++        configured_request_interval_ms()
++      end)
+ 
+     request_fun =
+       Keyword.get(opts, :request_fun, fn request_payload, headers ->
+@@ -148,23 +155,29 @@ defmodule SymphonyElixir.Linear.Client do
+       end)
+ 
+     with {:ok, headers} <- graphql_headers(tracker_settings),
+-         {:ok, %{status: 200, body: body}} <- request_fun.(payload, headers) do
+-      {:ok, body}
++         :ok <- RateLimit.acquire(request_interval_ms, rate_limit_server) do
++      case request_fun.(payload, headers) do
++        {:ok, %{status: 200, body: body}} ->
++          {:ok, body}
++
++        {:ok, response} ->
++          handle_error_response(payload, response, rate_limit_server)
++
++        {:error, reason} ->
++          Logger.error("Linear GraphQL request failed: #{inspect(reason)}")
++          {:error, {:linear_api_request, reason}}
++      end
+     else
+-      {:ok, response} ->
+-        Logger.error(
+-          "Linear GraphQL request failed status=#{response.status}" <>
+-            linear_error_context(payload, response)
+-        )
+-
+-        {:error, {:linear_api_status, response.status}}
+-
+-      {:error, reason} ->
+-        Logger.error("Linear GraphQL request failed: #{inspect(reason)}")
+-        {:error, {:linear_api_request, reason}}
++      {:error, reason} -> {:error, reason}
+     end
+   end
+ 
++  defp configured_request_interval_ms do
++    Config.settings!().polling.request_interval_ms
++  rescue
++    ArgumentError -> 1_500
++  end
++
+   @doc false
+   @spec normalize_issue_for_test(map()) :: Issue.t() | nil
+   def normalize_issue_for_test(issue) when is_map(issue) do
+@@ -333,6 +346,101 @@ defmodule SymphonyElixir.Linear.Client do
+ 
+   defp maybe_put_operation_name(payload, _operation_name), do: payload
+ 
++  defp handle_error_response(payload, response, rate_limit_server) do
++    case rate_limit_retry_after_ms(response) do
++      {:ok, retry_after_ms} ->
++        :ok = RateLimit.activate(retry_after_ms, rate_limit_server)
++
++        Logger.warning(
++          "Linear GraphQL rate limited retry_after_ms=#{retry_after_ms}" <>
++            linear_error_context(payload, response)
++        )
++
++        {:error, {:linear_rate_limited, retry_after_ms}}
++
++      :error ->
++        Logger.error(
++          "Linear GraphQL request failed status=#{response.status}" <>
++            linear_error_context(payload, response)
++        )
++
++        {:error, {:linear_api_status, response.status}}
++    end
++  end
++
++  defp rate_limit_retry_after_ms(%{status: status} = response) do
++    if status == 429 or rate_limited_body?(Map.get(response, :body)) do
++      {:ok, retry_after_header_ms(response) || default_rate_limit_cooldown_ms()}
++    else
++      :error
++    end
++  end
++
++  defp rate_limit_retry_after_ms(_response), do: :error
++
++  defp rate_limited_body?(body) when is_map(body) do
++    errors = Map.get(body, "errors") || Map.get(body, :errors)
++
++    is_list(errors) and
++      Enum.any?(errors, fn error ->
++        extensions = Map.get(error, "extensions") || Map.get(error, :extensions)
++
++        is_map(extensions) and
++          ((Map.get(extensions, "code") || Map.get(extensions, :code)) == "RATELIMITED" or
++             (Map.get(extensions, "statusCode") || Map.get(extensions, :statusCode)) == 429)
++      end)
++  end
++
++  defp rate_limited_body?(_body), do: false
++
++  defp retry_after_header_ms(%Req.Response{} = response) do
++    response
++    |> Req.Response.get_header("retry-after")
++    |> List.first()
++    |> parse_retry_after_ms()
++  end
++
++  defp retry_after_header_ms(%{headers: headers}) do
++    headers
++    |> header_value("retry-after")
++    |> parse_retry_after_ms()
++  end
++
++  defp retry_after_header_ms(_response), do: nil
++
++  defp header_value(headers, name) when is_map(headers) do
++    case Map.get(headers, name) || Map.get(headers, String.downcase(name)) do
++      [value | _] when is_binary(value) -> value
++      value when is_binary(value) -> value
++      _ -> nil
++    end
++  end
++
++  defp header_value(headers, name) when is_list(headers) do
++    Enum.find_value(headers, fn
++      {header_name, value} when is_binary(header_name) and is_binary(value) ->
++        if String.downcase(header_name) == name, do: value
++
++      _ ->
++        nil
++    end)
++  end
++
++  defp header_value(_headers, _name), do: nil
++
++  defp parse_retry_after_ms(value) when is_binary(value) do
++    case Integer.parse(String.trim(value)) do
++      {seconds, ""} when seconds >= 0 -> seconds * 1_000
++      _ -> nil
++    end
++  end
++
++  defp parse_retry_after_ms(_value), do: nil
++
++  defp default_rate_limit_cooldown_ms do
++    max(Config.settings!().polling.interval_ms, 15_000)
++  end
++
+   defp linear_error_context(payload, response) when is_map(payload) do
+     operation_name =
+       case Map.get(payload, "operationName") do
+diff --git a/elixir/lib/symphony_elixir/linear/rate_limit.ex b/elixir/lib/symphony_elixir/linear/rate_limit.ex
+new file mode 100644
+index 0000000000000000000000000000000000000000..260463b798860e9cb8948bf44e4d1c304034f2e2
+--- /dev/null
++++ b/elixir/lib/symphony_elixir/linear/rate_limit.ex
+@@ -0,0 +1,82 @@
++defmodule SymphonyElixir.Linear.RateLimit do
++  @moduledoc """
++  Shares Linear API cooldown state across pollers, retries, and agent tools.
++  """
++
++  use GenServer
++
++  @type error :: {:linear_rate_limited, non_neg_integer()}
++
++  @spec start_link(keyword()) :: GenServer.on_start()
++  def start_link(opts) do
++    name = Keyword.get(opts, :name, __MODULE__)
++    GenServer.start_link(__MODULE__, opts, name: name)
++  end
++
++  @spec check(GenServer.server()) :: :ok | {:error, error()}
++  def check(server \\ __MODULE__) do
++    GenServer.call(server, :check)
++  end
++
++  @spec acquire(non_neg_integer(), GenServer.server()) :: :ok | {:error, error()}
++  def acquire(request_interval_ms, server \\ __MODULE__)
++      when is_integer(request_interval_ms) and request_interval_ms >= 0 do
++    case GenServer.call(server, {:reserve, request_interval_ms}) do
++      {:wait, wait_ms} ->
++        Process.sleep(wait_ms)
++        check(server)
++
++      result ->
++        result
++    end
++  end
++
++  @spec activate(non_neg_integer(), GenServer.server()) :: :ok
++  def activate(retry_after_ms, server \\ __MODULE__)
++      when is_integer(retry_after_ms) and retry_after_ms >= 0 do
++    GenServer.call(server, {:activate, retry_after_ms})
++  end
++
++  @impl true
++  def init(_opts), do: {:ok, %{cooldown_until_ms: nil, next_request_at_ms: nil}}
++
++  @impl true
++  def handle_call(:check, _from, %{cooldown_until_ms: nil} = state), do: {:reply, :ok, state}
++
++  def handle_call(:check, _from, state) do
++    remaining_ms = max(state.cooldown_until_ms - now_ms(), 0)
++
++    if remaining_ms > 0 do
++      {:reply, {:error, {:linear_rate_limited, remaining_ms}}, state}
++    else
++      {:reply, :ok, %{state | cooldown_until_ms: nil}}
++    end
++  end
++
++  def handle_call({:reserve, request_interval_ms}, _from, state) do
++    now_ms = now_ms()
++    remaining_ms = max((state.cooldown_until_ms || now_ms) - now_ms, 0)
++
++    if remaining_ms > 0 do
++      {:reply, {:error, {:linear_rate_limited, remaining_ms}}, state}
++    else
++      request_at_ms = max(state.next_request_at_ms || now_ms, now_ms)
++      wait_ms = request_at_ms - now_ms
++
++      {:reply, {:wait, wait_ms},
++       %{
++         state
++         | cooldown_until_ms: nil,
++           next_request_at_ms: request_at_ms + request_interval_ms
++       }}
++    end
++  end
++
++  def handle_call({:activate, retry_after_ms}, _from, state) do
++    now_ms = now_ms()
++    cooldown_until_ms = max(state.cooldown_until_ms || now_ms, now_ms + retry_after_ms)
++    {:reply, :ok, %{state | cooldown_until_ms: cooldown_until_ms}}
++  end
++
++  defp now_ms, do: System.monotonic_time(:millisecond)
++end
+diff --git a/elixir/test/support/test_support.exs b/elixir/test/support/test_support.exs
+index ca7c5ddfff7b812ac74e8a582eaa02ccf814cc8b..36c9db4793045f1eec981304320d0b1a8903cdb4 100644
+--- a/elixir/test/support/test_support.exs
++++ b/elixir/test/support/test_support.exs
+@@ -100,6 +100,7 @@ defmodule SymphonyElixir.TestSupport do
+           tracker_active_states: ["Todo", "In Progress"],
+           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
+           poll_interval_ms: 30_000,
++          request_interval_ms: 0,
+           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
+           worker_ssh_hosts: [],
+           worker_max_concurrent_agents_per_host: nil,
+@@ -138,6 +139,7 @@ defmodule SymphonyElixir.TestSupport do
+     tracker_active_states = Keyword.get(config, :tracker_active_states)
+     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
+     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
++    request_interval_ms = Keyword.get(config, :request_interval_ms)
+     workspace_root = Keyword.get(config, :workspace_root)
+     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
+     worker_max_concurrent_agents_per_host = Keyword.get(config, :worker_max_concurrent_agents_per_host)
+@@ -178,6 +180,7 @@ defmodule SymphonyElixir.TestSupport do
+         "  terminal_states: #{yaml_value(tracker_terminal_states)}",
+         "polling:",
+         "  interval_ms: #{yaml_value(poll_interval_ms)}",
++        "  request_interval_ms: #{yaml_value(request_interval_ms)}",
+         "workspace:",
+         "  root: #{yaml_value(workspace_root)}",
+         worker_yaml(worker_ssh_hosts, worker_max_concurrent_agents_per_host),
+diff --git a/elixir/test/symphony_elixir/workspace_and_config_test.exs b/elixir/test/symphony_elixir/workspace_and_config_test.exs
+index 15f7c368e2ccacfebd56b56c61088c0a8726db63..28c5f6eeb9188a662265b70bcf853fad251df2bf 100644
+--- a/elixir/test/symphony_elixir/workspace_and_config_test.exs
++++ b/elixir/test/symphony_elixir/workspace_and_config_test.exs
+@@ -3,7 +3,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
+   alias Ecto.Changeset
+   alias SymphonyElixir.Config.Schema
+   alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
+-  alias SymphonyElixir.Linear.Client
++  alias SymphonyElixir.Linear.{Client, RateLimit}
+ 
+   test "workspace bootstrap can be implemented in after_create hook" do
+     test_root =
+@@ -1668,4 +1668,129 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
+       File.rm_rf(test_root)
+     end
+   end
++
++  test "linear client normalizes rate limits and shares the cooldown" do
++    rate_limit_name = Module.concat(__MODULE__, :LinearRateLimit)
++    start_supervised!({RateLimit, name: rate_limit_name})
++
++    assert {:error, {:linear_rate_limited, 2_000}} =
++             Client.graphql(
++               "query Viewer { viewer { id } }",
++               %{},
++               rate_limit_server: rate_limit_name,
++               request_fun: fn _payload, _headers ->
++                 {:ok,
++                  %{
++                    status: 400,
++                    headers: %{"retry-after" => "2"},
++                    body: %{
++                      "errors" => [
++                        %{"extensions" => %{"code" => "RATELIMITED", "statusCode" => 429}}
++                      ]
++                    }
++                  }}
++               end
++             )
++
++    assert {:error, {:linear_rate_limited, remaining_ms}} =
++             Client.graphql(
++               "query Viewer { viewer { id } }",
++               %{},
++               rate_limit_server: rate_limit_name,
++               request_fun: fn _payload, _headers -> flunk("cooldown must prevent the request") end
++             )
++
++    assert remaining_ms in 1..2_000
++  end
++
++  test "linear client normalizes HTTP 429 and resumes after its cooldown" do
++    rate_limit_name = Module.concat(__MODULE__, :HttpLinearRateLimit)
++    start_supervised!({RateLimit, name: rate_limit_name})
++
++    assert {:error, {:linear_rate_limited, 0}} =
++             Client.graphql(
++               "query Viewer { viewer { id } }",
++               %{},
++               rate_limit_server: rate_limit_name,
++               request_fun: fn _payload, _headers ->
++                 {:ok, %{status: 429, headers: %{"retry-after" => "0"}, body: %{}}}
++               end
++             )
++
++    assert {:ok, %{"data" => %{"viewer" => %{"id" => "recovered"}}}} =
++             Client.graphql(
++               "query Viewer { viewer { id } }",
++               %{},
++               rate_limit_server: rate_limit_name,
++               request_fun: fn _payload, _headers ->
++                 {:ok,
++                  %{
++                    status: 200,
++                    body: %{"data" => %{"viewer" => %{"id" => "recovered"}}}
++                  }}
++               end
++             )
++
++    assert :ok = RateLimit.activate(0)
++    assert :ok = RateLimit.check()
++  end
++
++  test "linear requests are proactively spaced without bypassing a later cooldown" do
++    rate_limit_name = Module.concat(__MODULE__, :PacedLinearRateLimit)
++    start_supervised!({RateLimit, name: rate_limit_name})
++
++    started_at = System.monotonic_time(:millisecond)
++    assert :ok = RateLimit.acquire(35, rate_limit_name)
++    assert :ok = RateLimit.acquire(35, rate_limit_name)
++    assert System.monotonic_time(:millisecond) - started_at >= 25
++
++    assert :ok = RateLimit.activate(40, rate_limit_name)
++    assert {:error, {:linear_rate_limited, check_remaining_ms}} = RateLimit.check(rate_limit_name)
++    assert check_remaining_ms in 1..40
++
++    assert {:error, {:linear_rate_limited, acquire_remaining_ms}} =
++             RateLimit.acquire(35, rate_limit_name)
++
++    assert acquire_remaining_ms in 1..40
++    Process.sleep(45)
++
++    assert :ok = RateLimit.acquire(80, rate_limit_name)
++    previous_request_at_ms = :sys.get_state(rate_limit_name).next_request_at_ms
++    task = Task.async(fn -> RateLimit.acquire(80, rate_limit_name) end)
++
++    assert Enum.any?(1..100, fn _attempt ->
++             if :sys.get_state(rate_limit_name).next_request_at_ms > previous_request_at_ms do
++               true
++             else
++               Process.sleep(1)
++               false
++             end
++           end)
++
++    assert :ok = RateLimit.activate(100, rate_limit_name)
++    assert {:error, {:linear_rate_limited, remaining_ms}} = Task.await(task)
++    assert remaining_ms in 1..100
++
++    assert :ok = RateLimit.activate(0)
++    assert :ok = RateLimit.acquire(0)
++  end
++
++  test "linear client recognizes atom-keyed Linear rate-limit wrappers" do
++    rate_limit_name = Module.concat(__MODULE__, :AtomKeyedLinearRateLimit)
++    start_supervised!({SymphonyElixir.Linear.RateLimit, name: rate_limit_name})
++
++    assert {:error, {:linear_rate_limited, _}} =
++             Client.graphql(
++               "query Viewer { viewer { id } }",
++               %{},
++               rate_limit_server: rate_limit_name,
++               request_fun: fn _payload, _headers ->
++                 {:ok,
++                  %{
++                    status: 400,
++                    body: %{errors: [%{extensions: %{code: "RATELIMITED", statusCode: 429}}]}
++                  }}
++               end
++             )
++  end
+ end

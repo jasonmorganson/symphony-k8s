@@ -9,7 +9,8 @@ autoscaler, workspace reclaimer, worker-affinity registry, or prompt overlay.
 ## Ownership boundaries
 
 - `jasonmorganson/symphony` supplies the generic scheduler and existing state
-  API. `scripts/verify-symphony-upstream.sh` proves its pinned tree is exactly
+  API. `scripts/verify-symphony-upstream.sh` proves its pinned tree differs
+  from upstream only by the committed generic Linear pacing patch and
   the pinned upstream tree before packaging.
 - `withAutograph/arrusted-development/WORKFLOW.md` supplies all behavioral
   policy, setup hooks, state routing, review gates, merge authorization, and
@@ -30,11 +31,11 @@ is the only production input. It pins:
 - resource requests and limits;
 - node placement, namespace, networking, and Secret references.
 
-The current digest values are the last live immutable images. The first image
-publication after this redesign opens a reviewed PR that changes the digest
-pins and `built_from_symphony_revision` together. Reconciliation fails closed
-until that provenance equals the desired Symphony revision, so an old image is
-never represented as the new source tree.
+The current digest values are the last live immutable images. A source-pin PR
+changes only `spec.symphony.revision`. Image publication then opens a reviewed
+PR that changes both digest pins and `built_from_symphony_revision` together.
+Reconciliation fails closed until that provenance equals the desired Symphony
+revision, so an old image is never represented as the new source tree.
 
 ## Workflow rendering
 
