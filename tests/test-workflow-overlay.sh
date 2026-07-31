@@ -283,7 +283,7 @@ printf '%s\n' \
 [[ "$(grep -c '^tracker:$' "$TEMP_DIR/runtime-workflow.md")" == 1 ]]
 grep -A6 '^  active_states:$' "$TEMP_DIR/runtime-workflow.md" |
   grep -Fq '    - Human Review'
-expected_recovery_ids=$'    - A-222\n    - A-235\n    - A-236\n    - A-238'
+expected_recovery_ids=$'    - A-220\n    - A-222\n    - A-235\n    - A-236\n    - A-238'
 rendered_recovery_ids="$(
   sed -n '/^  recovery_issue_ids:$/,/^  terminal_states:$/p' \
     "$TEMP_DIR/runtime-workflow.md" | sed '1d;$d'

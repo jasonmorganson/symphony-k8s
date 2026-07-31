@@ -14,11 +14,11 @@ grep -q '^worker:$' "$runtime"
 grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$runtime"
 grep -q '^  max_concurrent_agents: 10$' "$runtime"
 grep -q '^  max_turns: 10$' "$runtime"
-expected_recovery_ids=$'    - A-222\n    - A-235\n    - A-236\n    - A-238'
+expected_recovery_ids=$'    - A-220\n    - A-222\n    - A-235\n    - A-236\n    - A-238'
 actual_recovery_ids="$(sed -n '/^  recovery_issue_ids:$/,/^  terminal_states:$/p' "$runtime" |
   sed '1d;$d')"
 [[ "$actual_recovery_ids" == "$expected_recovery_ids" ]] || {
-  echo "frozen-cohort recovery allowlist must contain exactly A-222/A-235/A-236/A-238" >&2
+  echo "frozen-cohort recovery allowlist must contain exactly A-220/A-222/A-235/A-236/A-238" >&2
   exit 1
 }
 grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$runtime"

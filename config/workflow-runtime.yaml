@@ -9,6 +9,7 @@ tracker:
     - Merging
     - Rework
   recovery_issue_ids:
+    - A-220
     - A-222
     - A-235
     - A-236
