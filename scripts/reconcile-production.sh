@@ -151,7 +151,7 @@ elif (( target < current )); then
   ' "$temporary/reduced-hosts.yaml" "$current"
   apply_workflow
   apply_committed "$temporary/reduced-hosts.yaml"
-  kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=20m
+  kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=40m
 
   kubectl -n "$namespace" port-forward service/symphony-orchestrator 14000:4000 >"$temporary/port-forward.log" 2>&1 &
   port_forward_pid=$!
@@ -167,7 +167,7 @@ fi
 apply_committed "$temporary/production.yaml"
 kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
 wait_for_worker_convergence
-kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=20m
+kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=40m
 
 ready="$(kubectl -n "$namespace" get statefulset symphony-worker -o jsonpath='{.status.readyReplicas}')"
 [[ "${ready:-0}" == "$target" ]] || { echo "worker readiness does not match committed replicas" >&2; exit 1; }

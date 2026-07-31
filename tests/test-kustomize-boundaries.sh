@@ -11,7 +11,8 @@ read -r -a command <<< "$KUSTOMIZE"
 grep -q 'kind: StatefulSet' "$output"
 grep -q 'name: symphony-worker' "$output"
 grep -q 'type: Recreate' "$output"
-grep -q 'progressDeadlineSeconds: 1200' "$output"
+grep -q 'progressDeadlineSeconds: 2100' "$output"
+grep -q 'failureThreshold: 360' "$output"
 if grep -Eq 'symphony-autoscaler|workspace-reclaimer|volumeClaimTemplates|workflow-throughput-overlay' "$output"; then
   echo "removed controller or durable workspace leaked into Kustomize output" >&2
   exit 1
