@@ -81,11 +81,13 @@ spec:
             timeoutSeconds: 10
             failureThreshold: 6
           livenessProbe:
-            httpGet:
-              path: /
-              port: http
+            exec:
+              command:
+                - sh
+                - -c
+                - kill -0 1
             periodSeconds: 30
-            timeoutSeconds: 10
+            timeoutSeconds: 2
             failureThreshold: 6
           resources:
             requests:
