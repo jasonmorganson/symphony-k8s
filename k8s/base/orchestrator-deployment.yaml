@@ -25,7 +25,7 @@ spec:
       initContainers:
         - name: init-orchestrator-ssh
           image: busybox:1.36
-          command: [sh, -c, "cp /ssh-src/* /ssh-dst/ && chmod 600 /ssh-dst/id_ed25519 && chmod 644 /ssh-dst/known_hosts /ssh-dst/config && chown -R 10001:10001 /ssh-dst"]
+          command: [sh, -c, "cp /ssh-src/* /ssh-dst/ && chmod 600 /ssh-dst/id_ed25519 && chmod 644 /ssh-dst/known_hosts /ssh-dst/config && chown -R 10001:10001 /ssh-dst && cp /workflow/WORKFLOW.md /runtime/WORKFLOW.md && chown 10001:10001 /runtime/WORKFLOW.md && chmod 0400 /runtime/WORKFLOW.md"]
           securityContext:
             runAsUser: 0
           volumeMounts:
@@ -34,11 +34,16 @@ spec:
               readOnly: true
             - name: orchestrator-ssh
               mountPath: /ssh-dst
+            - name: workflow
+              mountPath: /workflow
+              readOnly: true
+            - name: workspaces
+              mountPath: /runtime
       containers:
         - name: orchestrator
           image: symphony-orchestrator
           imagePullPolicy: IfNotPresent
-          workingDir: /etc/symphony-workflow
+          workingDir: /srv/symphony/workspaces
           args:
             - start
           ports:
