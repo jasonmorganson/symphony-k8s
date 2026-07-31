@@ -492,8 +492,10 @@ the generated `WORKFLOW.md`.
 that Symphony must re-evaluate even when their current state is outside
 `active_states`. The pinned runtime still rejects terminal issues before dispatch,
 so an allowlisted issue already in `Done`, `Duplicate`, or another terminal state
-is harmless. Remove each recovery ID after Symphony has autonomously restored or
-completed it; never add `Backlog` to normal active processing for this purpose.
+is harmless. The current frozen-cohort recovery set is `A-220`, `A-222`, `A-235`,
+`A-236`, and `A-238`. Remove each recovery ID after Symphony has autonomously
+restored or completed it; never add `Backlog` to normal active processing for
+this purpose.
 
 The wrapper preflights the required DOKS add-ons, reconciles the `symphony-ha`
 pool to autoscaling bounds `0..10`, renders and validates in a temporary
