@@ -29,6 +29,9 @@ ruby -ryaml -e '
   abort "networking secret drift" unless tunnel.dig("valueFrom","secretKeyRef","name") == desired.dig("spec","networking","cloudflare_tunnel_secret")
   abort "fork provenance drift" unless cm.dig("metadata","annotations","symphony.morganson.me/symphony-revision") == desired.dig("spec","symphony","revision")
   abort "upstream provenance drift" unless cm.dig("metadata","annotations","symphony.morganson.me/symphony-upstream-revision") == desired.dig("spec","symphony","upstream_revision")
+  worker_pod_annotations=sts.dig("spec","template","metadata","annotations")
+  abort "workflow revision must not restart workers" if worker_pod_annotations.key?("symphony.morganson.me/workflow-revision")
+  abort "workflow checksum must not restart workers" if worker_pod_annotations.key?("symphony.morganson.me/workflow-sha256")
 ' "$output" "$desired"
 
 if grep -Eq 'autoscaler|workspace-reclaimer|workflow-throughput-overlay|drain_state_path|affinity_state_path' "$output"; then
