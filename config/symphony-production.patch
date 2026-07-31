@@ -289,6 +289,36 @@ index 0000000000000000000000000000000000000000..260463b798860e9cb8948bf44e4d1c30
 +
 +  defp now_ms, do: System.monotonic_time(:millisecond)
 +end
+diff --git a/elixir/lib/symphony_elixir/orchestrator.ex b/elixir/lib/symphony_elixir/orchestrator.ex
+index b52e991c08ac14d1d5c1c4e6f63e33c35f35bb8c..26697937f5bae7c27f2b7bd61140c5107989a0a6 100644
+--- a/elixir/lib/symphony_elixir/orchestrator.ex
++++ b/elixir/lib/symphony_elixir/orchestrator.ex
+@@ -69,7 +69,7 @@ defmodule SymphonyElixir.Orchestrator do
+           codex_rate_limits: nil
+         }
+ 
+-        run_terminal_workspace_cleanup()
++        start_terminal_workspace_cleanup(state.task_supervisor)
+         state = schedule_tick(state, 0)
+ 
+         {:ok, state}
+@@ -1174,6 +1174,16 @@ defmodule SymphonyElixir.Orchestrator do
+     end
+   end
+ 
++  defp start_terminal_workspace_cleanup(task_supervisor) do
++    case Task.Supervisor.start_child(task_supervisor, &run_terminal_workspace_cleanup/0) do
++      {:ok, _pid} ->
++        :ok
++
++      {:error, reason} ->
++        Logger.warning("Skipping startup terminal workspace cleanup; failed to start task: #{inspect(reason)}")
++    end
++  end
++
+   defp notify_dashboard do
+     StatusDashboard.notify_update()
+   end
 diff --git a/elixir/test/support/test_support.exs b/elixir/test/support/test_support.exs
 index ca7c5ddfff7b812ac74e8a582eaa02ccf814cc8b..36c9db4793045f1eec981304320d0b1a8903cdb4 100644
 --- a/elixir/test/support/test_support.exs
