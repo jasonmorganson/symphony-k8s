@@ -11,9 +11,24 @@ abort "invalid Symphony revision" unless revision.match?(sha)
 abort "invalid orchestrator digest" unless orchestrator.match?(digest)
 abort "invalid worker digest" unless worker.match?(digest)
 
-document = YAML.safe_load(File.read(path), permitted_classes: [], aliases: false)
+contents = File.read(path)
+updates = {
+  "built_from_symphony_revision" => revision,
+  "orchestrator" => orchestrator,
+  "worker" => worker
+}
+
+updates.each do |key, value|
+  pattern = /^    #{Regexp.escape(key)}:\s*.+$/
+  abort "expected exactly one #{key} field" unless contents.scan(pattern).length == 1
+
+  contents = contents.sub(pattern) { "    #{key}: #{value}" }
+end
+
+document = YAML.safe_load(contents, permitted_classes: [], aliases: false)
 images = document.fetch("spec").fetch("images")
-images["built_from_symphony_revision"] = revision
-images["orchestrator"] = orchestrator
-images["worker"] = worker
-File.write(path, YAML.dump(document))
+updates.each do |key, value|
+  abort "failed to update #{key}" unless images.fetch(key) == value
+end
+
+File.write(path, contents)

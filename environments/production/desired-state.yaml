@@ -1,4 +1,3 @@
----
 apiVersion: symphony.morganson.me/v1alpha1
 kind: SymphonyEnvironment
 metadata:
@@ -21,13 +20,13 @@ spec:
   workers:
     replicas: 10
     capacity_per_worker: 1
-    workspace_root: "/srv/symphony/workspaces"
+    workspace_root: /srv/symphony/workspaces
     resources:
       requests:
-        cpu: '2'
+        cpu: "2"
         memory: 4Gi
       limits:
-        cpu: '4'
+        cpu: "4"
         memory: 6Gi
     node_selector:
       doks.digitalocean.com/node-pool: symphony-ha
@@ -37,7 +36,7 @@ spec:
         cpu: 100m
         memory: 3Gi
       limits:
-        cpu: '1'
+        cpu: "1"
         memory: 6Gi
     node_selector:
       doks.digitalocean.com/node-pool: symphony-control
@@ -46,12 +45,12 @@ spec:
     port: 4001
   secrets:
     references:
-    - symphony-secrets
-    - symphony-orchestrator-ssh
-    - symphony-worker-authorized-keys
-    - symphony-worker-hostkeys
-    - github-machine-arrusted-symphony
-    - codex-chatgpt-auth
-    - cloudflare-tunnel-token
+      - symphony-secrets
+      - symphony-orchestrator-ssh
+      - symphony-worker-authorized-keys
+      - symphony-worker-hostkeys
+      - github-machine-arrusted-symphony
+      - codex-chatgpt-auth
+      - cloudflare-tunnel-token
   networking:
     cloudflare_tunnel_secret: cloudflare-tunnel-token
