@@ -259,8 +259,20 @@ pub fn capacity_demand(
     // the autoscaler floor at the number of live sessions plus warm retries so
     // a queued eligible issue cannot be starved by an undercounted snapshot.
     let live_floor = state.running.len().saturating_add(warm_retrying);
+    // Keep one bounded admission slot when the observed demand is already
+    // fully occupied. This covers a freshly-created active issue omitted from
+    // the latest Linear snapshot without imposing a state-specific limit.
+    let admission_headroom = u32::from(
+        live_floor < 10
+            && !state.running.is_empty()
+            && warm_retrying > 0
+            && state.demand.eligible > 0
+            && u32::try_from(live_floor).unwrap_or(u32::MAX) >= observed_demand,
+    );
 
-    observed_demand.max(u32::try_from(live_floor).unwrap_or(u32::MAX))
+    observed_demand
+        .max(u32::try_from(live_floor).unwrap_or(u32::MAX))
+        .saturating_add(admission_headroom)
 }
 
 pub fn retry_needs_capacity(
@@ -445,6 +457,29 @@ mod tests {
             })
             .collect();
         state.retrying = (6..10)
+            .map(|ordinal| crate::symphony::SessionEntry {
+                issue_identifier: Some(format!("A-retry-{ordinal}")),
+                worker_host: Some(format!("symphony-worker-{ordinal}.workers")),
+                due_at: Some(now + TimeDelta::seconds(30)),
+            })
+            .collect();
+
+        assert_eq!(capacity_demand(&state, now, 120), 10);
+    }
+
+    #[test]
+    fn eligible_demand_gets_one_bounded_admission_slot() {
+        let now = Utc::now();
+        let mut state = state(0);
+        state.demand.eligible = 9;
+        state.running = (0..6)
+            .map(|ordinal| crate::symphony::SessionEntry {
+                issue_identifier: Some(format!("A-running-{ordinal}")),
+                worker_host: Some(format!("symphony-worker-{ordinal}.workers")),
+                due_at: None,
+            })
+            .collect();
+        state.retrying = (6..9)
             .map(|ordinal| crate::symphony::SessionEntry {
                 issue_identifier: Some(format!("A-retry-{ordinal}")),
                 worker_host: Some(format!("symphony-worker-{ordinal}.workers")),
