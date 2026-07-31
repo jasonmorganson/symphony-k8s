@@ -57,6 +57,19 @@ apply_workflow() {
 kubectl -n "$namespace" delete deployment symphony-autoscaler --ignore-not-found --wait=true
 worker_json="$(kubectl -n "$namespace" get statefulset symphony-worker --ignore-not-found -o json)"
 if [[ -n "$worker_json" ]]; then
+  recreate_worker="$(ruby -rjson -e '
+    object=JSON.parse(STDIN.read)
+    claims=object.dig("spec", "volumeClaimTemplates") || []
+    names=claims.map { |claim| claim.dig("metadata", "name") }
+    abort "unknown legacy worker volume claims; refusing recreation" unless names.empty? || names == ["workspaces"]
+    puts "true" unless names.empty?
+  ' <<<"$worker_json")"
+  if [[ "$recreate_worker" == true ]]; then
+    kubectl -n "$namespace" delete statefulset symphony-worker --cascade=orphan --wait=true
+    worker_json=""
+  fi
+fi
+if [[ -n "$worker_json" ]]; then
   reclaimer_patch="$(ruby -rjson -e '
     object=JSON.parse(STDIN.read)
     containers=object.dig("spec", "template", "spec", "containers") || []
@@ -72,6 +85,22 @@ if [[ -n "$worker_json" ]]; then
   ' <<<"$worker_json")"
   if [[ -n "$reclaimer_patch" ]]; then
     kubectl -n "$namespace" patch statefulset symphony-worker --type=json -p "$reclaimer_patch"
+  fi
+  permissions_patch="$(ruby -rjson -e '
+    object=JSON.parse(STDIN.read)
+    containers=object.dig("spec", "template", "spec", "initContainers") || []
+    indexes=containers.each_index.select { |index| containers[index]["name"] == "init-workspace-permissions" }
+    abort "multiple legacy workspace permission initializers found; refusing cleanup" if indexes.length > 1
+    if indexes.one?
+      index=indexes.first
+      puts JSON.generate([
+        {"op" => "test", "path" => "/spec/template/spec/initContainers/#{index}/name", "value" => "init-workspace-permissions"},
+        {"op" => "remove", "path" => "/spec/template/spec/initContainers/#{index}"}
+      ])
+    end
+  ' <<<"$worker_json")"
+  if [[ -n "$permissions_patch" ]]; then
+    kubectl -n "$namespace" patch statefulset symphony-worker --type=json -p "$permissions_patch"
   fi
 fi
 

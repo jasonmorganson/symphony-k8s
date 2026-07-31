@@ -36,6 +36,11 @@ grep -q -- 'delete deployment symphony-autoscaler --ignore-not-found --wait=true
 grep -q -- '"op" => "test".*"workspace-reclaimer"' \
   "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- '"op" => "remove"' "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'unknown legacy worker volume claims; refusing recreation' \
+  "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'delete statefulset symphony-worker --cascade=orphan --wait=true' \
+  "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'init-workspace-permissions' "$ROOT_DIR/scripts/reconcile-production.sh"
 
 updater_input="$tmpdir/updater-input.yaml"
 cp "$ROOT_DIR/environments/production/desired-state.yaml" "$updater_input"
