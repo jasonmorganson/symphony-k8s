@@ -17,6 +17,7 @@ printf '%s\n' \
   '---' \
   '# Canonical workflow' \
   'Canonical instruction.' \
+  'Generic state route: move landed Merging work to Human Review.' \
   > "$canonical"
 printf '%s\n' '# Deployment overlay' 'Overlay instruction.' > "$overlay"
 
@@ -41,6 +42,27 @@ grep -Fq 'This read guard does not alter upstream' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'dispatch, Merging, landing, or Linear-transition behavior.' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fqx '# Route landed work before review or authority policy' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'all attached pull requests are terminal, at least one is merged' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'never transition the issue from `Merging` to `Human Review`' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'restore `Merging` as the first workflow-owned transition' \
+  "$TEMP_DIR/throughput-rendered.md"
+canonical_route_line="$(grep -nF 'Generic state route: move landed Merging work to Human Review.' \
+  "$TEMP_DIR/throughput-rendered.md" | cut -d: -f1)"
+landed_route_line="$(grep -nF '# Route landed work before review or authority policy' \
+  "$TEMP_DIR/throughput-rendered.md" | cut -d: -f1)"
+authority_line="$(grep -nF '# Preserve explicit merge authority' \
+  "$TEMP_DIR/throughput-rendered.md" | cut -d: -f1)"
+human_review_line="$(grep -nF '# Human Review maintenance lane' \
+  "$TEMP_DIR/throughput-rendered.md" | cut -d: -f1)"
+(( canonical_route_line < landed_route_line && landed_route_line < authority_line && \
+  landed_route_line < human_review_line )) || {
+  echo "specific landed-work routing must override canonical and precede generic overlay lanes" >&2
+  exit 1
+}
 grep -Fqx '# Preserve active issue state across orchestration control flow' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Never move an existing active issue in `In Progress`, `Human Review`, `Merging`, or `Rework`' \
@@ -243,16 +265,33 @@ grep -Fq 'Only a terminal authoritative failure may create or reactivate a succe
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'terminal successful containing-main gate disproves the proposed successor lane' \
   "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'normalized failure signature containing the repository, workflow, failed job' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Exclude containing-main SHAs, run and job IDs' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Query at most 25 current' "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'If one active repair already owns the signature' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'keep the source issue frozen in `Merging`' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'the oldest active repair retains ownership' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'canonical workflow-owned duplicate or terminal transition' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'Fail closed and defer without code changes when signatures or ownership are ambiguous' \
+  "$TEMP_DIR/throughput-rendered.md"
 grep -Fqx '# Recover issues bounced after merge' \
   "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'if an `In Progress` or `Rework` issue has exactly one' \
+grep -Fq 'if an `In Progress`, `Rework`, or `Human Review` issue has the' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'route directly to' "$TEMP_DIR/throughput-rendered.md"
-grep -Fq 'post-merge reconciliation before reproducing, planning, editing, reviewing, or running' \
+grep -Fq 'reconciliation before reproducing, planning, editing, reviewing, or running' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'transition the issue directly to `Done` using the canonical workflow-owned' \
   "$TEMP_DIR/throughput-rendered.md"
 grep -Fq 'Do not create a successor branch, rerun the implementation test suite' \
+  "$TEMP_DIR/throughput-rendered.md"
+grep -Fq 'restore that issue to `Merging` before deferring' \
   "$TEMP_DIR/throughput-rendered.md"
 if grep -Eq 'symphony_merge_writer|"action":"(yield|acquire|release)"' \
     "$TEMP_DIR/throughput-rendered.md"; then
@@ -308,6 +347,16 @@ grep -Fqx '# Consolidated review for mechanical main-CI repairs' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Preserve active issue state across orchestration control flow' \
   "$TEMP_DIR/runtime-workflow.md"
+grep -Fqx '# Route landed work before review or authority policy' \
+  "$TEMP_DIR/runtime-workflow.md"
+runtime_landed_route_line="$(grep -nF '# Route landed work before review or authority policy' \
+  "$TEMP_DIR/runtime-workflow.md" | cut -d: -f1)"
+runtime_authority_line="$(grep -nF '# Preserve explicit merge authority' \
+  "$TEMP_DIR/runtime-workflow.md" | cut -d: -f1)"
+runtime_human_review_line="$(grep -nF '# Human Review maintenance lane' \
+  "$TEMP_DIR/runtime-workflow.md" | cut -d: -f1)"
+(( runtime_landed_route_line < runtime_authority_line && \
+  runtime_landed_route_line < runtime_human_review_line ))
 grep -Fq 'On interruption, leave the issue state unchanged' \
   "$TEMP_DIR/runtime-workflow.md"
 grep -Fqx '# Durable review proof across session boundaries' \

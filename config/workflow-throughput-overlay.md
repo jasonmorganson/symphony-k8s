@@ -9,6 +9,26 @@ Do not replace a missing or ambiguous bounded result with an unbounded query for
 comments, attachments, relations, or workpad content. This read guard does not alter upstream
 dispatch, Merging, landing, or Linear-transition behavior.
 
+# Route landed work before review or authority policy
+
+At the start of every active turn, resolve whether landing already occurred before applying the
+canonical state table, pre-merge authority policy, blocked-access escape, or `Human Review`
+maintenance lane. If an issue is in `Merging` and its durable workpad identifies the landed pull
+request or frozen containing-main revision, route directly to post-merge reconciliation. The same
+route applies when all attached pull requests are terminal, at least one is merged, and no attached
+pull request remains open. A sequence of merged implementation and repair pull requests is landed
+evidence; it does not create an open-pull-request requirement or ambiguous pre-merge ownership.
+
+Once landing is established, never transition the issue from `Merging` to `Human Review` for a
+missing open pull request, failed or pending post-merge proof, absent merge authority, or any other
+pre-merge readiness reason. Keep it in `Merging` and apply the post-merge rules below. If a prior
+workflow turn already bounced such an issue to `Human Review`, and state history or the durable
+workpad proves it was awaiting post-merge verification in `Merging`, bypass the `Human Review`
+maintenance lane. When all required frozen-revision gates are successful, transition directly to
+`Done`; otherwise restore `Merging` as the first workflow-owned transition and continue or defer
+there. This route has higher precedence than every later pre-merge authority, blocked-access,
+review-maintenance, and pull-request-readiness instruction.
+
 # Preserve active issue state across orchestration control flow
 
 Never move an existing active issue in `In Progress`, `Human Review`, `Merging`, or `Rework` to
@@ -352,16 +372,34 @@ successor issue independently reproduces its own acceptance failure on that same
 revision. Do not consume a worker rerunning implementation tests merely to confirm a pending
 cross-issue suspicion.
 
+Before creating or activating a repair for a terminal containing-main failure, compute and record a
+normalized failure signature containing the repository, workflow, failed job, stable failing test or
+check identifier, and normalized failure signal. Exclude containing-main SHAs, run and job IDs,
+timestamps, attempt counters, and other occurrence-specific values. Query at most 25 current
+nonterminal repair issues for that exact signature and stop as soon as ownership is unambiguous.
+
+If one active repair already owns the signature, do not create, activate, or implement another
+repair. Record the authoritative owner and occurrence evidence in the source issue's durable
+workpad, keep the source issue frozen in `Merging`, and defer to the owning repair. If duplicate
+repair issues are already active and the exact signature plus authoritative ownership agree
+unambiguously, the oldest active repair retains ownership. Each later duplicate records the owner
+evidence and uses the canonical workflow-owned duplicate or terminal transition when supported;
+otherwise it defers without implementation. Never make a monitor or parent task perform that
+transition. Fail closed and defer without code changes when signatures or ownership are ambiguous.
+
 # Recover issues bounced after merge
 
-At the start of any active turn, if an `In Progress` or `Rework` issue has exactly one
-unambiguous attached pull request and that pull request is already merged, route directly to
-post-merge reconciliation before reproducing, planning, editing, reviewing, or running
-implementation tests. Verify the containing-main revision and every required post-merge gate.
+At the start of any active turn, if an `In Progress`, `Rework`, or `Human Review` issue has the
+landed evidence defined by the higher-precedence route above, route directly to post-merge
+reconciliation before reproducing, planning, editing, reviewing, or running implementation tests.
+Verify the frozen containing-main revision and every required post-merge gate. Do not require an
+open pull request after landing and do not treat a terminal series of attached repair pull requests
+as ambiguous pre-merge ownership.
 
 When those gates are already terminal and successful, update the durable workpad with their exact
 evidence and transition the issue directly to `Done` using the canonical workflow-owned
 transition. Do not create a successor branch, rerun the implementation test suite, or return the
 issue to `Merging` first. If any required gate is pending, keep the issue in its current active
-state and wait outside the model. If a gate is terminal and failed, follow the canonical
+state unless it is a proven `Human Review` bounce; restore that issue to `Merging` before deferring.
+If a gate is terminal and failed, restore a proven bounce to `Merging` and follow the canonical
 failure-repair semantics for that exact failure.
