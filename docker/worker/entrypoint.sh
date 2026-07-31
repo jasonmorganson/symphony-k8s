@@ -3,10 +3,9 @@ set -euo pipefail
 
 SYMPHONY_HOME="${SYMPHONY_HOME:-/home/symphony}"
 SYMPHONY_WORKSPACE_ROOT="${SYMPHONY_WORKSPACE_ROOT:-/srv/symphony/workspaces}"
-ARRUSTED_REPOSITORY_URL="${ARRUSTED_REPOSITORY_URL:-https://github.com/withAutograph/arrusted-development.git}"
-GITHUB_MACHINE_LOGIN="autograph-symphony"
-GITHUB_MACHINE_NAME="autograph-symphony"
-GITHUB_MACHINE_EMAIL="jason+symphony@withgraph.com"
+GITHUB_MACHINE_LOGIN="${GITHUB_MACHINE_LOGIN:-}"
+GITHUB_MACHINE_NAME="${GITHUB_MACHINE_NAME:-symphony-worker}"
+GITHUB_MACHINE_EMAIL="${GITHUB_MACHINE_EMAIL:-symphony-worker@users.noreply.github.com}"
 CODEX_AUTH_SOURCE="${CODEX_AUTH_SOURCE:-/etc/symphony/codex-auth/auth.json}"
 
 trim_secret() {
@@ -19,7 +18,7 @@ trim_secret() {
 
 verify_required_commands() {
   local command_name
-  for command_name in bash codex curl gh git jq mise sshd symphony-session-supervisor timeout unzip zip; do
+  for command_name in bash codex curl gh git jq mise sshd timeout unzip zip; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
       echo "required worker command is unavailable: $command_name" >&2
       return 1
@@ -79,21 +78,8 @@ configure_github_auth() {
   authenticated_login="$(runuser -u symphony -- \
     env -u GITHUB_TOKEN -u GH_TOKEN HOME="$SYMPHONY_HOME" \
     gh api user --jq .login)"
-  if [[ "$authenticated_login" != "$GITHUB_MACHINE_LOGIN" ]]; then
+  if [[ -n "$GITHUB_MACHINE_LOGIN" && "$authenticated_login" != "$GITHUB_MACHINE_LOGIN" ]]; then
     echo "GitHub credential is not the required Symphony machine identity" >&2
-    return 1
-  fi
-
-  if ! runuser -u symphony -- \
-    env -u GITHUB_TOKEN -u GH_TOKEN HOME="$SYMPHONY_HOME" \
-    gh repo view withAutograph/arrusted-development \
-      --json nameWithOwner --jq .nameWithOwner >/dev/null; then
-    echo "GitHub machine credential cannot access the required repository" >&2
-    return 1
-  fi
-  if ! runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
-    git ls-remote --exit-code "$ARRUSTED_REPOSITORY_URL" HEAD >/dev/null; then
-    echo "Git HTTPS cannot access the required repository" >&2
     return 1
   fi
 
@@ -177,27 +163,6 @@ ensure_codex_chatgpt_session() {
   verify_codex_chatgpt_session
 }
 
-install_workspace_branch_guards() {
-  local issue_identifier workspace
-
-  while IFS= read -r -d '' workspace; do
-    if [[ -e "$workspace/.git" ]]; then
-      issue_identifier="$(basename "$workspace")"
-      if [[ "$issue_identifier" =~ ^\.reclaim-[A-Za-z]+-[0-9]+-[1-9][0-9]*$ ]]; then
-        continue
-      fi
-      if [[ ! "$issue_identifier" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
-        echo "refusing to guard a workspace without an issue identifier: $workspace" >&2
-        return 1
-      fi
-      runuser -u symphony -- env \
-        HOME="$SYMPHONY_HOME" \
-        SYMPHONY_WORKSPACE_ROOT="$SYMPHONY_WORKSPACE_ROOT" \
-        /usr/local/bin/install-workspace-branch-guard "$workspace"
-    fi
-  done < <(find "$SYMPHONY_WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -print0)
-}
-
 main() {
 trim_secret LINEAR_API_KEY
 verify_required_commands
@@ -210,8 +175,6 @@ mkdir -p "$SYMPHONY_WORKSPACE_ROOT" "$SYMPHONY_HOME/.ssh" /run/sshd
 chown symphony:symphony "$SYMPHONY_WORKSPACE_ROOT"
 chmod 0777 "$SYMPHONY_WORKSPACE_ROOT"
 chown symphony:symphony "$SYMPHONY_HOME" "$SYMPHONY_HOME/.ssh"
-install_workspace_branch_guards
-
 if [[ -f /etc/ssh/authorized-keys/authorized_keys ]]; then
   cp /etc/ssh/authorized-keys/authorized_keys "$SYMPHONY_HOME/.ssh/authorized_keys"
   chown symphony:symphony "$SYMPHONY_HOME/.ssh/authorized_keys"
@@ -219,37 +182,9 @@ if [[ -f /etc/ssh/authorized-keys/authorized_keys ]]; then
 fi
 
 chmod 700 "$SYMPHONY_HOME/.ssh"
-install -d -m 0750 -o root -g symphony /run/symphony
+touch /run/symphony-worker-ready
 
-# Both services are children of this root-owned PID 1. If either exits, the
-# worker becomes unready and is restarted; a daemon failure therefore cannot
-# silently remove the exclusive-session boundary.
-env -u LINEAR_API_KEY -u LINEAR_TOKEN -u TRACKER_TOKEN -u GITHUB_TOKEN -u GH_TOKEN \
-  /usr/local/bin/symphony-session-supervisor daemon &
-local supervisor_pid=$!
-/usr/sbin/sshd -D -e &
-local sshd_pid=$!
-
-cleanup_services() {
-  rm -f /run/symphony-worker-ready
-  kill "$sshd_pid" "$supervisor_pid" 2>/dev/null || true
-  wait "$sshd_pid" "$supervisor_pid" 2>/dev/null || true
-}
-trap cleanup_services EXIT TERM INT
-
-for _ in {1..100}; do
-  if [[ -S /run/symphony/session-supervisor.sock ]] && kill -0 "$supervisor_pid" "$sshd_pid" 2>/dev/null; then
-    touch /run/symphony-worker-ready
-    break
-  fi
-  sleep 0.05
-done
-[[ -f /run/symphony-worker-ready ]] || {
-  echo "worker services did not become ready" >&2
-  return 1
-}
-
-wait -n "$supervisor_pid" "$sshd_pid"
+exec /usr/sbin/sshd -D -e
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

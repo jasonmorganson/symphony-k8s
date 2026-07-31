@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - ../base
   - cloudflared-deployment.yaml
-  - autoscaler.yaml
 
 patches:
   - target:
@@ -25,53 +24,5 @@ patches:
       kind: Ingress
       metadata:
         name: symphony-orchestrator
-  - target:
-      kind: PersistentVolumeClaim
-      name: symphony-orchestrator-workspaces
-    patch: |-
-      - op: add
-        path: /spec/storageClassName
-        value: do-block-storage
-  - target:
-      kind: PodDisruptionBudget
-      name: symphony-orchestrator
-    patch: |-
-      - op: remove
-        path: /spec/minAvailable
-      - op: add
-        path: /spec/maxUnavailable
-        value: 1
-  - target:
-      kind: PodDisruptionBudget
-      name: symphony-worker
-    patch: |-
-      - op: remove
-        path: /spec/minAvailable
-      - op: add
-        path: /spec/maxUnavailable
-        value: 1
-  - target:
-      kind: Deployment
-      name: symphony-orchestrator
-    patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: Always
-  - target:
-      kind: StatefulSet
-      name: symphony-worker
-    patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: Always
-  - path: single-node-worker-patch.yaml
   - path: system-workloads-patch.yaml
   - path: worker-pool-patch.yaml
-
-images:
-  - name: nscr.io/k7qcltdhpncg0/symphony-k8s/orchestrator
-    newName: ghcr.io/jasonmorganson/symphony-k8s-orchestrator
-    digest: sha256:0e76de50b1127457fd48b4e7d690d0fabd4eb56863317f0f7ee4b1311e812eeb
-  - name: nscr.io/k7qcltdhpncg0/symphony-k8s/worker
-    newName: ghcr.io/jasonmorganson/symphony-k8s-worker
-    newTag: "20260712-chatgpt"
