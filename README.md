@@ -384,6 +384,18 @@ is included in active demand and dispatch, and its prompt contract limits work
 to readiness maintenance while preserving explicit human approval. When no
 maintenance is actionable, the agent leaves the issue in `Human Review` and
 uses Symphony's bounded deferred recheck instead of consuming immediate turns.
+Landing is resolved before this maintenance route: an issue already awaiting
+post-merge proof remains in `Merging`, and a proven post-merge bounce bypasses
+the maintenance lane and is restored by Symphony without requiring an open PR.
+Terminal containing-main failures are deduplicated by repository, workflow,
+job, stable failing test/check, and normalized failure signal before a repair is
+created or activated. Occurrence-specific SHA and run IDs do not split one root
+cause into multiple repair lanes. The A-330/A-331/A-332 `Test (Kernel)` incident
+is the regression pattern: one deterministic failing test across successive
+main revisions has one active repair owner, while affected source issues remain
+frozen in `Merging`. Already-active duplicates are reconciled through
+workflow-owned duplicate/terminal transitions only when ownership is exact;
+ambiguous signatures fail closed without implementation.
 Autoscaler health and capacity measurements are available from its metrics
 endpoint:
 

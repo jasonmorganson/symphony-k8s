@@ -45,6 +45,19 @@ if grep -q 'requester-policy\\|python3\\|autoscaler.scaler' "$generator"; then
 fi
 
 grep -q '^# DOKS Linear-read guard$' "$throughput_overlay"
+grep -q '^# Route landed work before review or authority policy$' "$throughput_overlay"
+grep -q 'resolve whether landing already occurred before applying the' "$throughput_overlay"
+grep -q 'all attached pull requests are terminal, at least one is merged' "$throughput_overlay"
+grep -q 'never transition the issue from `Merging` to `Human Review`' "$throughput_overlay"
+grep -q 'restore `Merging` as the first workflow-owned transition' "$throughput_overlay"
+landed_route_line="$(grep -n '^# Route landed work before review or authority policy$' \
+  "$throughput_overlay" | cut -d: -f1)"
+authority_line="$(grep -n '^# Preserve explicit merge authority$' "$throughput_overlay" | cut -d: -f1)"
+human_review_line="$(grep -n '^# Human Review maintenance lane$' "$throughput_overlay" | cut -d: -f1)"
+(( landed_route_line < authority_line && landed_route_line < human_review_line )) || {
+  echo "landed-work routing must precede pre-merge authority and Human Review policy" >&2
+  exit 1
+}
 grep -q '^# Recover an explicitly stranded active issue$' "$throughput_overlay"
 grep -q 'This recovery rule has higher precedence than every generic `Backlog -> stop`' \
   "$throughput_overlay"
@@ -106,6 +119,20 @@ grep -q 'do not advance the proof target to a newer' "$throughput_overlay"
 grep -q 'transition the issue directly from `Merging` to' "$throughput_overlay"
 grep -q 'When a required post-merge gate fails, keep' "$throughput_overlay"
 grep -q 'the issue in `Merging` and follow the canonical failure-repair' \
+  "$throughput_overlay"
+grep -q 'normalized failure signature containing the repository, workflow, failed job' \
+  "$throughput_overlay"
+grep -q 'Exclude containing-main SHAs, run and job IDs' "$throughput_overlay"
+grep -q 'Query at most 25 current' "$throughput_overlay"
+grep -q 'If one active repair already owns the signature' "$throughput_overlay"
+grep -q 'keep the source issue frozen in `Merging`' "$throughput_overlay"
+grep -q 'the oldest active repair retains ownership' "$throughput_overlay"
+grep -q 'canonical workflow-owned duplicate or terminal transition' "$throughput_overlay"
+grep -q 'Fail closed and defer without code changes when signatures or ownership are ambiguous' \
+  "$throughput_overlay"
+grep -q 'if an `In Progress`, `Rework`, or `Human Review` issue has the' \
+  "$throughput_overlay"
+grep -q 'do not treat a terminal series of attached repair pull requests' \
   "$throughput_overlay"
 if grep -q 'symphony_merge_writer\\|action.*acquire\\|action.*yield' "$throughput_overlay"; then
   echo "workflow overlay must not install custom merge serialization" >&2
