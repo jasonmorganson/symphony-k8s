@@ -6,4 +6,5 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY rust ./rust
 RUN cargo build --locked --release \
     --bin symphony-autoscaler \
-    --bin symphony-workspace-reclaimer
+    --bin symphony-workspace-reclaimer \
+    --bin symphony-session-supervisor

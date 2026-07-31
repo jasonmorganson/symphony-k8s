@@ -77,6 +77,7 @@ grep -Fq 'SYMPHONY_RELEASE_IMAGE = "release"' "$bake_file"
 [[ "$(grep -Fc 'CONTROL_PLANE_BUILD = "control-plane-build"' "$bake_file")" -eq 2 ]]
 grep -Fq -- '--bin symphony-autoscaler' "$control_plane_dockerfile"
 grep -Fq -- '--bin symphony-workspace-reclaimer' "$control_plane_dockerfile"
+grep -Fq -- '--bin symphony-session-supervisor' "$control_plane_dockerfile"
 if grep -Fq 'cargo build' "$worker_dockerfile" ||
     grep -Fq 'cargo build' "$autoscaler_dockerfile"; then
   echo "final image Dockerfiles must reuse the shared control-plane build" >&2
@@ -84,6 +85,9 @@ if grep -Fq 'cargo build' "$worker_dockerfile" ||
 fi
 grep -Fq \
   'COPY --from=control-plane-build /src/target/release/symphony-workspace-reclaimer' \
+  "$worker_dockerfile"
+grep -Fq \
+  'COPY --from=control-plane-build /src/target/release/symphony-session-supervisor' \
   "$worker_dockerfile"
 grep -Fq \
   'COPY --from=control-plane-build /src/target/release/symphony-autoscaler' \

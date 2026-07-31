@@ -146,7 +146,7 @@ grep -A1 'name: SYMPHONY_EXTERNAL_WORKSPACE_RECLAIMER' "$orchestrator_deployment
 
 # This pinned Symphony revision has executable coverage proving configured Backlog recoveries
 # dispatch while a configured recovery already in Done remains terminal and does not dispatch.
-grep -q '^ARG SYMPHONY_COMMIT=034d369bcf4e1631beba9cb6bc67d2544c767491$' \
+grep -q '^ARG SYMPHONY_COMMIT=e800d2438d9a3f337510268863cbdef6b7c250e5$' \
   "$release_dockerfile"
 
 # Recovery is a narrow candidate exception, not an expansion of active or terminal state policy.
