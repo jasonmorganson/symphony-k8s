@@ -191,18 +191,24 @@ expected_checksum="$(ruby -ryaml -e '
 
 verify_workload_provenance() {
   local resource="$1"
+  local workflow_location="$2"
   kubectl -n "$namespace" get "$resource" -o json | ruby -rjson -e '
     object=JSON.parse(STDIN.read)
-    expected_symphony, expected_upstream, expected_workflow, expected_checksum=ARGV
-    annotations=object.dig("spec","template","metadata","annotations") || {}
-    abort "live Symphony revision provenance differs" unless annotations["symphony.morganson.me/symphony-revision"] == expected_symphony
-    abort "live Symphony upstream provenance differs" unless annotations["symphony.morganson.me/symphony-upstream-revision"] == expected_upstream
-    abort "live workflow revision provenance differs" unless annotations["symphony.morganson.me/workflow-revision"] == expected_workflow
-    abort "live workflow checksum provenance differs" unless annotations["symphony.morganson.me/workflow-sha256"] == expected_checksum
-  ' "$symphony_revision" "$symphony_upstream_revision" "$workflow_revision" "$expected_checksum"
+    expected_symphony, expected_upstream, expected_workflow, expected_checksum, workflow_location=ARGV
+    template_annotations=object.dig("spec","template","metadata","annotations") || {}
+    abort "live Symphony revision provenance differs" unless template_annotations["symphony.morganson.me/symphony-revision"] == expected_symphony
+    abort "live Symphony upstream provenance differs" unless template_annotations["symphony.morganson.me/symphony-upstream-revision"] == expected_upstream
+    workflow_annotations = if workflow_location == "template"
+      template_annotations
+    else
+      object.dig("metadata","annotations") || {}
+    end
+    abort "live workflow revision provenance differs" unless workflow_annotations["symphony.morganson.me/workflow-revision"] == expected_workflow
+    abort "live workflow checksum provenance differs" unless workflow_annotations["symphony.morganson.me/workflow-sha256"] == expected_checksum
+  ' "$symphony_revision" "$symphony_upstream_revision" "$workflow_revision" "$expected_checksum" "$workflow_location"
 }
-verify_workload_provenance deployment/symphony-orchestrator
-verify_workload_provenance statefulset/symphony-worker
+verify_workload_provenance deployment/symphony-orchestrator template
+verify_workload_provenance statefulset/symphony-worker metadata
 
 kubectl -n "$namespace" get configmap symphony-workflow -o json | ruby -rjson -rdigest -e '
   config_map=JSON.parse(STDIN.read)
