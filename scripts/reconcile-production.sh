@@ -41,8 +41,12 @@ ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0])).dig("spec","secrets","referen
 ruby "$repo_root/scripts/extract-resource.rb" \
   "$temporary/production.yaml" ConfigMap symphony-workflow "$temporary/workflow.yaml"
 workflow_applied=false
+apply_committed() {
+  kubectl apply --server-side --force-conflicts --field-manager=symphony-gitops -f "$1"
+}
+
 apply_workflow() {
-  kubectl apply --server-side --field-manager=symphony-gitops -f "$temporary/workflow.yaml"
+  apply_committed "$temporary/workflow.yaml"
   workflow_applied=true
 }
 
@@ -51,7 +55,7 @@ current="${current:-0}"
 
 if (( target > current )); then
   ruby "$repo_root/scripts/extract-resource.rb" "$temporary/production.yaml" StatefulSet symphony-worker "$temporary/workers.yaml"
-  kubectl apply --server-side --field-manager=symphony-gitops -f "$temporary/workers.yaml"
+  apply_committed "$temporary/workers.yaml"
   kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
   apply_workflow
 elif (( target < current )); then
@@ -65,7 +69,7 @@ elif (( target < current )); then
     File.write(path, docs.map { |d| YAML.dump(d) }.join("---\n"))
   ' "$temporary/reduced-hosts.yaml" "$current"
   apply_workflow
-  kubectl apply --server-side --field-manager=symphony-gitops -f "$temporary/reduced-hosts.yaml"
+  apply_committed "$temporary/reduced-hosts.yaml"
   kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=20m
 
   kubectl -n "$namespace" port-forward service/symphony-orchestrator 14000:4000 >"$temporary/port-forward.log" 2>&1 &
@@ -79,7 +83,7 @@ elif (( target < current )); then
 fi
 
 [[ "$workflow_applied" == true ]] || apply_workflow
-kubectl apply --server-side --field-manager=symphony-gitops -f "$temporary/production.yaml"
+apply_committed "$temporary/production.yaml"
 kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
 kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=20m
 
