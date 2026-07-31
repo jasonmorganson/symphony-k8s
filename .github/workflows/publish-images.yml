@@ -229,6 +229,8 @@ jobs:
             autoscaler.tags=symphony-autoscaler:test
       - name: Test worker authentication
         run: bash tests/test-worker-auth.sh
+      - name: Test worker session supervisor contract
+        run: bash tests/test-session-supervisor-contract.sh
       - name: Test worker image contract
         run: bash tests/test-worker-image-contract.sh
       - name: Smoke-test worker gate utilities

@@ -19,7 +19,7 @@ trim_secret() {
 
 verify_required_commands() {
   local command_name
-  for command_name in bash codex curl gh git jq mise sshd timeout unzip zip; do
+  for command_name in bash codex curl gh git jq mise sshd symphony-session-supervisor timeout unzip zip; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
       echo "required worker command is unavailable: $command_name" >&2
       return 1
@@ -219,9 +219,37 @@ if [[ -f /etc/ssh/authorized-keys/authorized_keys ]]; then
 fi
 
 chmod 700 "$SYMPHONY_HOME/.ssh"
-touch /run/symphony-worker-ready
+install -d -m 0750 -o root -g symphony /run/symphony
 
-exec /usr/sbin/sshd -D -e
+# Both services are children of this root-owned PID 1. If either exits, the
+# worker becomes unready and is restarted; a daemon failure therefore cannot
+# silently remove the exclusive-session boundary.
+env -u LINEAR_API_KEY -u LINEAR_TOKEN -u TRACKER_TOKEN -u GITHUB_TOKEN -u GH_TOKEN \
+  /usr/local/bin/symphony-session-supervisor daemon &
+local supervisor_pid=$!
+/usr/sbin/sshd -D -e &
+local sshd_pid=$!
+
+cleanup_services() {
+  rm -f /run/symphony-worker-ready
+  kill "$sshd_pid" "$supervisor_pid" 2>/dev/null || true
+  wait "$sshd_pid" "$supervisor_pid" 2>/dev/null || true
+}
+trap cleanup_services EXIT TERM INT
+
+for _ in {1..100}; do
+  if [[ -S /run/symphony/session-supervisor.sock ]] && kill -0 "$supervisor_pid" "$sshd_pid" 2>/dev/null; then
+    touch /run/symphony-worker-ready
+    break
+  fi
+  sleep 0.05
+done
+[[ -f /run/symphony-worker-ready ]] || {
+  echo "worker services did not become ready" >&2
+  return 1
+}
+
+wait -n "$supervisor_pid" "$sshd_pid"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

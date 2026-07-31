@@ -43,16 +43,14 @@ worker:
 hooks:
   timeout_ms: 600000
   after_create: |
-    exec /usr/local/bin/bootstrap-arrusted-workspace "$PWD"
+    exec env -u LINEAR_API_KEY -u LINEAR_TOKEN -u TRACKER_TOKEN /usr/local/bin/symphony-session-supervisor client -- /usr/local/bin/bootstrap-arrusted-workspace "$PWD"
   before_remove: |
-    if command -v wt >/dev/null 2>&1; then
-      wt hook post-remove --yes || echo "wt post-remove hook not configured; skipping." >&2
-    fi
+    exec env -u LINEAR_API_KEY -u LINEAR_TOKEN -u TRACKER_TOKEN /usr/local/bin/symphony-session-supervisor client -- bash -lc 'if command -v wt >/dev/null 2>&1; then wt hook post-remove --yes || echo "wt post-remove hook not configured; skipping." >&2; fi'
 agent:
   max_concurrent_agents: 10
   max_turns: 10
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=medium --config agents.max_threads=3 --model gpt-5.6 app-server
+  command: env -u LINEAR_API_KEY -u LINEAR_TOKEN -u TRACKER_TOKEN /usr/local/bin/symphony-session-supervisor client -- codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=medium --config agents.max_threads=3 --model gpt-5.6 app-server
   approval_policy: never
   thread_sandbox: danger-full-access
   turn_sandbox_policy:

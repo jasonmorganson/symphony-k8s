@@ -14,6 +14,7 @@ grep -q 'jq --version' "$DOCKERFILE"
 grep -q 'rg --version' "$DOCKERFILE"
 grep -q 'unzip -v' "$DOCKERFILE"
 grep -q 'zip --version' "$DOCKERFILE"
+grep -q 'symphony-session-supervisor' "$DOCKERFILE"
 
 if [[ $# -eq 0 ]]; then
   exit 0
@@ -31,6 +32,7 @@ docker run --rm --entrypoint sh "$1" -c '
   command -v rg
   command -v unzip
   command -v zip
+  command -v symphony-session-supervisor
   gh --version
   jq --version
   rg --version
