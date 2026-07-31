@@ -42,5 +42,7 @@ if grep -Eq 'withAutograph|arrusted|autograph-symphony' "$ROOT_DIR/docker/worker
   echo "generic worker image contains repository-specific policy" >&2
   exit 1
 fi
+grep -Fq 'url.https://github.com/.insteadOf git@github.com:' \
+  "$ROOT_DIR/docker/worker/entrypoint.sh"
 
 echo "worker authentication and ephemerality contract is valid"

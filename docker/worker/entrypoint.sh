@@ -54,7 +54,7 @@ synchronize_codex_auth() {
 }
 
 configure_github_auth() {
-  local authenticated_login configured_name configured_email gh_hosts_file
+  local authenticated_login configured_name configured_email configured_github_transport gh_hosts_file
 
   trim_secret GITHUB_TOKEN
 
@@ -89,14 +89,19 @@ configure_github_auth() {
     git config --global user.email "$GITHUB_MACHINE_EMAIL"
   runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
     git config --global user.useConfigOnly true
+  runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
+    git config --global url.https://github.com/.insteadOf git@github.com:
 
   configured_name="$(runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
     git config --global --get user.name)"
   configured_email="$(runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
     git config --global --get user.email)"
+  configured_github_transport="$(runuser -u symphony -- env HOME="$SYMPHONY_HOME" \
+    git config --global --get url.https://github.com/.insteadOf)"
   if [[ "$configured_name" != "$GITHUB_MACHINE_NAME" || \
-        "$configured_email" != "$GITHUB_MACHINE_EMAIL" ]]; then
-    echo "Git author identity does not match the required Symphony machine identity" >&2
+        "$configured_email" != "$GITHUB_MACHINE_EMAIL" || \
+        "$configured_github_transport" != "git@github.com:" ]]; then
+    echo "Git identity or authenticated GitHub transport is misconfigured" >&2
     return 1
   fi
 
