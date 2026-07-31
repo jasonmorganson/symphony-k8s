@@ -14,10 +14,13 @@ grep -q '^worker:$' "$runtime"
 grep -q 'symphony-worker-9.symphony-worker.symphony.svc.cluster.local' "$runtime"
 grep -q '^  max_concurrent_agents: 10$' "$runtime"
 grep -q '^  max_turns: 10$' "$runtime"
-if grep -q '^  recovery_issue_ids:' "$runtime"; then
-  echo "one-shot recovery targets must be removed after workflow-owned recovery" >&2
+expected_recovery_ids=$'    - A-222\n    - A-235\n    - A-236\n    - A-238'
+actual_recovery_ids="$(sed -n '/^  recovery_issue_ids:$/,/^  terminal_states:$/p' "$runtime" |
+  sed '1d;$d')"
+[[ "$actual_recovery_ids" == "$expected_recovery_ids" ]] || {
+  echo "frozen-cohort recovery allowlist must contain exactly A-222/A-235/A-236/A-238" >&2
   exit 1
-fi
+}
 grep -q '^  drain_state_path: /srv/symphony/workspaces/.worker-drains.json$' "$runtime"
 [[ "$(grep -c '^    - symphony-worker-[0-9]' "$runtime")" -eq 10 ]]
 
@@ -141,6 +144,18 @@ grep -A1 'name: SYMPHONY_EXTERNAL_WORKSPACE_RECLAIMER' "$orchestrator_deployment
   exit 1
 }
 
-grep -q '^ARG SYMPHONY_COMMIT=' "$release_dockerfile"
+# This pinned Symphony revision has executable coverage proving configured Backlog recoveries
+# dispatch while a configured recovery already in Done remains terminal and does not dispatch.
+grep -q '^ARG SYMPHONY_COMMIT=034d369bcf4e1631beba9cb6bc67d2544c767491$' \
+  "$release_dockerfile"
+
+# Recovery is a narrow candidate exception, not an expansion of active or terminal state policy.
+if grep -A6 '^  active_states:$' "$runtime" | grep -Fq '    - Backlog'; then
+  echo "Backlog must remain outside normal active processing" >&2
+  exit 1
+fi
+for terminal_state in Closed Cancelled Canceled Duplicate Done; do
+  grep -A5 '^  terminal_states:$' "$runtime" | grep -Fqx "    - $terminal_state"
+done
 
 echo "workflow and control-plane tests passed"

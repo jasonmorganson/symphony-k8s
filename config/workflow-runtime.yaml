@@ -8,6 +8,11 @@ tracker:
     - Human Review
     - Merging
     - Rework
+  recovery_issue_ids:
+    - A-222
+    - A-235
+    - A-236
+    - A-238
   terminal_states:
     - Closed
     - Cancelled
