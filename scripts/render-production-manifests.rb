@@ -48,16 +48,20 @@ tunnel_token = cloudflared_env.find { |entry| entry["name"] == "TUNNEL_TOKEN" }
 abort "cloudflared is missing TUNNEL_TOKEN" unless tunnel_token
 tunnel_token.dig("valueFrom", "secretKeyRef")["name"] = spec.dig("networking", "cloudflare_tunnel_secret")
 
-annotations = {
+source_annotations = {
   "symphony.morganson.me/symphony-revision" => spec.dig("symphony", "revision"),
-  "symphony.morganson.me/symphony-upstream-revision" => spec.dig("symphony", "upstream_revision"),
+  "symphony.morganson.me/symphony-upstream-revision" => spec.dig("symphony", "upstream_revision")
+}
+workflow_annotations = {
   "symphony.morganson.me/workflow-revision" => spec.dig("workflow", "revision"),
   "symphony.morganson.me/workflow-sha256" => metadata.fetch("workflow_sha256")
 }
+annotations = source_annotations.merge(workflow_annotations)
 [orchestrator, worker].each do |workload|
   workload["metadata"]["annotations"] = (workload["metadata"]["annotations"] || {}).merge(annotations)
-  workload.dig("spec", "template", "metadata")["annotations"] = annotations
 end
+orchestrator.dig("spec", "template", "metadata")["annotations"] = annotations
+worker.dig("spec", "template", "metadata")["annotations"] = source_annotations
 
 forbidden = documents.select do |doc|
   doc.dig("metadata", "name")&.match?(/autoscaler|reclaimer/) ||
