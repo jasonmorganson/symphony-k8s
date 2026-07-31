@@ -25,7 +25,24 @@ spec:
       initContainers:
         - name: init-orchestrator-ssh
           image: busybox:1.36
-          command: [sh, -c, "cp /ssh-src/* /ssh-dst/ && chmod 600 /ssh-dst/id_ed25519 && chmod 644 /ssh-dst/known_hosts /ssh-dst/config && chown -R 10001:10001 /ssh-dst && cp /workflow/WORKFLOW.md /runtime/WORKFLOW.md && chown 10001:10001 /runtime/WORKFLOW.md && chmod 0400 /runtime/WORKFLOW.md"]
+          command: [sh, -c]
+          args:
+            - |
+              cp /ssh-src/* /ssh-dst/
+              cat >>/ssh-dst/config <<'EOF'
+
+              Host *
+                BatchMode yes
+                ConnectTimeout 10
+                ServerAliveInterval 10
+                ServerAliveCountMax 3
+              EOF
+              chmod 600 /ssh-dst/id_ed25519
+              chmod 644 /ssh-dst/known_hosts /ssh-dst/config
+              chown -R 10001:10001 /ssh-dst
+              cp /workflow/WORKFLOW.md /runtime/WORKFLOW.md
+              chown 10001:10001 /runtime/WORKFLOW.md
+              chmod 0400 /runtime/WORKFLOW.md
           securityContext:
             runAsUser: 0
           volumeMounts:
