@@ -1,3 +1,4 @@
+---
 apiVersion: symphony.morganson.me/v1alpha1
 kind: SymphonyEnvironment
 metadata:
@@ -14,19 +15,19 @@ spec:
     path: WORKFLOW.md
     revision: 1fcf112f5d3bb2643d4cdcf44221b4719c2e40b8
   images:
-    built_from_symphony_revision: e800d24f9c3ae2f62d2902f455f21eb51945bef5
-    orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:fed31a6291f2e38d46be0e28f55e328b8d0a5fcf1765e5ca8f310ebf08a83508
-    worker: ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:e582f4c5afdc547f9c3acda962ed2d50f44678ab9fbac6541f503e3917d8637c
+    built_from_symphony_revision: bebfcea85208df81d1692b868e79195e0ddad3fb
+    orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:a7eab35befcc0979632169136a80d1c64c7171bff9c96d27fcddcca623b81261
+    worker: ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:7131dc5620b7daa65a80113abc38c4c1b28af93ca16784c003dcc462ba85243f
   workers:
     replicas: 10
     capacity_per_worker: 1
-    workspace_root: /srv/symphony/workspaces
+    workspace_root: "/srv/symphony/workspaces"
     resources:
       requests:
-        cpu: "2"
+        cpu: '2'
         memory: 4Gi
       limits:
-        cpu: "4"
+        cpu: '4'
         memory: 6Gi
     node_selector:
       doks.digitalocean.com/node-pool: symphony-ha
@@ -36,7 +37,7 @@ spec:
         cpu: 100m
         memory: 3Gi
       limits:
-        cpu: "1"
+        cpu: '1'
         memory: 6Gi
     node_selector:
       doks.digitalocean.com/node-pool: symphony-control
@@ -45,12 +46,12 @@ spec:
     port: 4001
   secrets:
     references:
-      - symphony-secrets
-      - symphony-orchestrator-ssh
-      - symphony-worker-authorized-keys
-      - symphony-worker-hostkeys
-      - github-machine-arrusted-symphony
-      - codex-chatgpt-auth
-      - cloudflare-tunnel-token
+    - symphony-secrets
+    - symphony-orchestrator-ssh
+    - symphony-worker-authorized-keys
+    - symphony-worker-hostkeys
+    - github-machine-arrusted-symphony
+    - codex-chatgpt-auth
+    - cloudflare-tunnel-token
   networking:
     cloudflare_tunnel_secret: cloudflare-tunnel-token
