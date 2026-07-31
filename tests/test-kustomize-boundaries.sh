@@ -12,8 +12,8 @@ grep -q 'kind: StatefulSet' "$output"
 grep -A7 -F 'startupProbe:' "$output" | grep -Fq 'timeoutSeconds: 10'
 grep -A8 -F 'readinessProbe:' "$output" | grep -Fq 'timeoutSeconds: 10'
 grep -A8 -F 'readinessProbe:' "$output" | grep -Fq 'failureThreshold: 6'
-grep -A9 -F 'livenessProbe:' "$output" | grep -Fq 'timeoutSeconds: 10'
-grep -A9 -F 'livenessProbe:' "$output" | grep -Fq 'failureThreshold: 6'
+grep -A10 -F 'livenessProbe:' "$output" | grep -Fq 'kill -0 1'
+grep -A10 -F 'livenessProbe:' "$output" | grep -Fq 'failureThreshold: 6'
 grep -q 'name: symphony-worker' "$output"
 grep -q 'type: Recreate' "$output"
 grep -q 'progressDeadlineSeconds: 2100' "$output"
