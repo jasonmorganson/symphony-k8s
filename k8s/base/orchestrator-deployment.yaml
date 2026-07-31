@@ -76,6 +76,11 @@ spec:
             runAsNonRoot: true
             runAsUser: 10001
             runAsGroup: 10001
+          env:
+            - name: LANG
+              value: C.UTF-8
+            - name: ELIXIR_ERL_OPTIONS
+              value: +fnu
           envFrom:
             - secretRef:
                 name: symphony-secrets
