@@ -38,13 +38,9 @@ spec:
         - name: orchestrator
           image: symphony-orchestrator
           imagePullPolicy: IfNotPresent
+          workingDir: /etc/symphony-workflow
           args:
-            - eval
-            - SymphonyElixir.CLI.main(System.argv())
-            - --i-understand-that-this-will-be-running-without-the-usual-guardrails
-            - --port
-            - "4001"
-            - /etc/symphony-workflow/WORKFLOW.md
+            - start
           ports:
             - name: http
               containerPort: 4000
