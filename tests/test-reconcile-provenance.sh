@@ -47,6 +47,9 @@ grep -q -- 'init-workspace-permissions' "$ROOT_DIR/scripts/reconcile-production.
 }
 grep -q -- 'status\["currentRevision"\] == status\["updateRevision"\]' \
   "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'workflow_dispatch:' "$ROOT_DIR/.github/workflows/validate.yml"
+grep -q -- 'gh workflow run validate.yml --ref "$branch"' \
+  "$ROOT_DIR/.github/workflows/publish-images.yml"
 
 updater_input="$tmpdir/updater-input.yaml"
 cp "$ROOT_DIR/environments/production/desired-state.yaml" "$updater_input"
