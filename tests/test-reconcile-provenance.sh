@@ -31,6 +31,11 @@ apply_count="$(grep -c 'kubectl apply --server-side' "$ROOT_DIR/scripts/reconcil
 }
 grep -q -- 'kubectl apply --server-side --force-conflicts --field-manager=symphony-gitops' \
   "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'delete deployment symphony-autoscaler --ignore-not-found --wait=true' \
+  "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- '"op" => "test".*"workspace-reclaimer"' \
+  "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- '"op" => "remove"' "$ROOT_DIR/scripts/reconcile-production.sh"
 
 updater_input="$tmpdir/updater-input.yaml"
 cp "$ROOT_DIR/environments/production/desired-state.yaml" "$updater_input"

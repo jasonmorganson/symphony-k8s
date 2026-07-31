@@ -50,6 +50,31 @@ apply_workflow() {
   workflow_applied=true
 }
 
+# Server-side apply cannot remove list entries or resources that were created by
+# the retired deployment managers. Reconcile their absence explicitly before
+# changing capacity so the old autoscaler cannot fight the committed replica
+# count and the old reclaimer cannot survive in newly rolled worker pods.
+kubectl -n "$namespace" delete deployment symphony-autoscaler --ignore-not-found --wait=true
+worker_json="$(kubectl -n "$namespace" get statefulset symphony-worker --ignore-not-found -o json)"
+if [[ -n "$worker_json" ]]; then
+  reclaimer_patch="$(ruby -rjson -e '
+    object=JSON.parse(STDIN.read)
+    containers=object.dig("spec", "template", "spec", "containers") || []
+    indexes=containers.each_index.select { |index| containers[index]["name"] == "workspace-reclaimer" }
+    abort "multiple legacy workspace reclaimers found; refusing cleanup" if indexes.length > 1
+    if indexes.one?
+      index=indexes.first
+      puts JSON.generate([
+        {"op" => "test", "path" => "/spec/template/spec/containers/#{index}/name", "value" => "workspace-reclaimer"},
+        {"op" => "remove", "path" => "/spec/template/spec/containers/#{index}"}
+      ])
+    end
+  ' <<<"$worker_json")"
+  if [[ -n "$reclaimer_patch" ]]; then
+    kubectl -n "$namespace" patch statefulset symphony-worker --type=json -p "$reclaimer_patch"
+  fi
+fi
+
 current="$(kubectl -n "$namespace" get statefulset symphony-worker --ignore-not-found -o jsonpath='{.spec.replicas}')"
 current="${current:-0}"
 
