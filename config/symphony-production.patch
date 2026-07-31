@@ -490,3 +490,116 @@ index 15f7c368e2ccacfebd56b56c61088c0a8726db63..28c5f6eeb9188a662265b70bcf853fad
 +             )
 +  end
  end
+diff --git a/elixir/lib/symphony_elixir/orchestrator.ex b/elixir/lib/symphony_elixir/orchestrator.ex
+index 26697937f5bae7c27f2b7bd61140c5107989a0a6..1ad4170f8c4ceb25d53595bdbb432114e3bea97b 100644
+--- a/elixir/lib/symphony_elixir/orchestrator.ex
++++ b/elixir/lib/symphony_elixir/orchestrator.ex
+@@ -11,6 +11,7 @@ defmodule SymphonyElixir.Orchestrator do
+   alias SymphonyElixir.Tracker.Issue
+
+   @continuation_retry_delay_ms 1_000
++  @capacity_retry_delay_ms 1_000
+   @failure_retry_base_ms 10_000
+   # Slightly above the dashboard render interval so "checking now…" can render.
+   @poll_transition_render_delay_ms 20
+@@ -401,6 +402,18 @@ defmodule SymphonyElixir.Orchestrator do
+     sort_issues_for_dispatch(issues)
+   end
+
++  @doc false
++  @spec new_issue_slots_available_for_test(term()) :: boolean()
++  def new_issue_slots_available_for_test(%State{} = state) do
++    new_issue_slots_available?(state)
++  end
++
++  @doc false
++  @spec retry_delay_for_test(pos_integer(), map()) :: non_neg_integer()
++  def retry_delay_for_test(attempt, metadata) do
++    retry_delay(attempt, metadata)
++  end
++
+   @doc false
+   @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
+   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
+@@ -823,13 +836,17 @@ defmodule SymphonyElixir.Orchestrator do
+       !MapSet.member?(claimed, issue.id) and
+       !Map.has_key?(running, issue.id) and
+       !Map.has_key?(blocked, issue.id) and
+-      available_slots(state) > 0 and
++      new_issue_slots_available?(state) and
+       state_slots_available?(issue, running) and
+       worker_slots_available?(state)
+   end
+
+   defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
+
++  defp new_issue_slots_available?(%State{} = state) do
++    available_slots(state) > map_size(state.retry_attempts)
++  end
++
+   defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
+     limit = Config.max_concurrent_agents_for_state(issue_state)
+     used = running_issue_count_for_state(running, issue_state)
+@@ -1221,9 +1238,10 @@ defmodule SymphonyElixir.Orchestrator do
+        schedule_issue_retry(
+          state,
+          issue.id,
+-         attempt + 1,
++         attempt,
+          Map.merge(metadata, %{
+            identifier: issue.identifier,
++           delay_type: :capacity,
+            error: "no available orchestrator slots"
+          })
+        )}
+@@ -1240,10 +1258,10 @@ defmodule SymphonyElixir.Orchestrator do
+   end
+
+   defp retry_delay(attempt, metadata) when is_integer(attempt) and attempt > 0 and is_map(metadata) do
+-    if metadata[:delay_type] == :continuation and attempt == 1 do
+-      @continuation_retry_delay_ms
+-    else
+-      failure_retry_delay(attempt)
++    case metadata[:delay_type] do
++      :capacity -> @capacity_retry_delay_ms
++      :continuation when attempt == 1 -> @continuation_retry_delay_ms
++      _ -> failure_retry_delay(attempt)
+     end
+   end
+
+diff --git a/elixir/test/symphony_elixir/core_test.exs b/elixir/test/symphony_elixir/core_test.exs
+index 1263601cdcc106b92a371084fef0198926ac5846..50e285105eb267b719a48ccb7ba11bffca4817ea 100644
+--- a/elixir/test/symphony_elixir/core_test.exs
++++ b/elixir/test/symphony_elixir/core_test.exs
+@@ -1059,6 +1059,31 @@ defmodule SymphonyElixir.CoreTest do
+     assert_due_in_range(due_at_ms, 500, 1_100)
+   end
+
++  test "pending retries reserve capacity ahead of new issues" do
++    running_entry = %{worker_host: "worker-0"}
++
++    state = %Orchestrator.State{
++      max_concurrent_agents: 3,
++      running: %{"running" => running_entry},
++      retry_attempts: %{
++        "retry-1" => %{attempt: 4},
++        "retry-2" => %{attempt: 9}
++      }
++    }
++
++    refute Orchestrator.new_issue_slots_available_for_test(state)
++
++    assert Orchestrator.new_issue_slots_available_for_test(%{
++             state
++             | retry_attempts: %{"retry-1" => %{attempt: 4}}
++           })
++  end
++
++  test "capacity deferral stays prompt without consuming failure attempts" do
++    assert Orchestrator.retry_delay_for_test(12, %{delay_type: :capacity}) == 1_000
++    assert Orchestrator.retry_delay_for_test(12, %{}) == 300_000
++  end
++
+   test "abnormal worker exit increments retry attempt progressively" do
+     issue_id = "issue-crash"
+     ref = make_ref()
