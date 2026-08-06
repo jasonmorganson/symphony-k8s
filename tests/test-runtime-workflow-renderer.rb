@@ -25,7 +25,15 @@ fixture = <<~WORKFLOW
   ---
   # Policy body
 
-  This body is behavior and must remain byte-for-byte.  
+  A failure affecting the current issue's implementation, acceptance criteria,
+  attached PR, merge, required checks, or post-merge validation belongs to the
+  current issue; do not create a related, blocking, or replacement Linear issue.
+
+  Before creating a clearly unrelated Backlog follow-up, record an Unrelated
+  follow-up rationale in the current issue workpad.
+
+  Keep the issue in Merging through post-merge checks. Attach a repair PR to the
+  same issue and move to Done only after the final merged evidence is green.
 WORKFLOW
 
 Dir.mktmpdir do |dir|
@@ -41,6 +49,9 @@ Dir.mktmpdir do |dir|
   source_body = fixture.split("---\n", 3).last
   rendered_body = rendered.split("---\n", 3).last
   abort "workflow body changed" unless rendered_body == source_body
+  abort "implementation failure ownership rule missing" unless rendered_body.include?("belongs to the\ncurrent issue; do not create a related, blocking, or replacement Linear issue.")
+  abort "unrelated follow-up rationale rule missing" unless rendered_body.include?("Before creating a clearly unrelated Backlog follow-up, record an Unrelated\nfollow-up rationale in the current issue workpad.")
+  abort "same-issue post-merge repair rule missing" unless rendered_body.include?("Keep the issue in Merging through post-merge checks. Attach a repair PR to the\nsame issue and move to Done only after the final merged evidence is green.")
 
   front = YAML.safe_load(rendered.split("---\n", 3)[1], permitted_classes: [], aliases: false)
   replicas = YAML.safe_load(File.read(desired)).dig("spec", "workers", "replicas")
