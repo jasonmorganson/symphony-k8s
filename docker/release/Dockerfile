@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mix local.hex --force && mix local.rebar --force
 
 ARG SYMPHONY_REPO=https://github.com/jasonmorganson/symphony.git
-ARG SYMPHONY_COMMIT=2be7cc3a89e886041e4289450d9a956a22922fd3
+ARG SYMPHONY_COMMIT=67c1cd54a298d072a9a522f1df54f9b915d8e8ee
 RUN if [ ! -f mix.exs ]; then \
       git clone --filter=blob:none --no-checkout "${SYMPHONY_REPO}" /tmp/symphony-src && \
       git -C /tmp/symphony-src fetch --depth=1 origin "${SYMPHONY_COMMIT}" && \
