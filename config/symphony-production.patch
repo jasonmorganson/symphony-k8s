@@ -1,51 +1,514 @@
+diff --git a/README.md b/README.md
+index e0f24a0..7924bff 100644
+--- a/README.md
++++ b/README.md
+@@ -36,2 +36,5 @@ help with the setup:
+ 
++The reference implementation can select Codex settings per Linear task with `model:<model-id>`
++and `reasoning:<effort>` labels; the workflow config supplies the defaults.
++
+ ---
+diff --git a/elixir/README.md b/elixir/README.md
+index f17a297..98cc7da 100644
+--- a/elixir/README.md
++++ b/elixir/README.md
+@@ -135,2 +135,4 @@ codex:
+   command: codex app-server
++  model: gpt-5.6-terra
++  reasoning_effort: medium
+ ---
+@@ -155,2 +157,7 @@ Notes:
+   - `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy rooted at the current issue workspace
++- `codex.model` and `codex.reasoning_effort` are the workflow defaults. A task can override either
++  setting with exactly one `model:<model-id>` or `reasoning:<effort>` label. Symphony snapshots
++  those labels when the agent run starts and uses the same values for every continuation turn.
++  Conflicting or empty setting labels, and Codex-rejected overrides, block the task without retrying
++  until one of its setting labels changes.
+ - `codex.turn_timeout_ms` is the maximum silence interval while a turn is streaming. Each
+@@ -193,3 +200,5 @@ hooks:
+ codex:
+-  command: "$CODEX_BIN --config 'model=\"gpt-5.5\"' app-server"
++  command: "$CODEX_BIN app-server"
++  model: gpt-5.6-terra
++  reasoning_effort: medium
+ ```
+diff --git a/elixir/WORKFLOW.md b/elixir/WORKFLOW.md
+index c87d048..5ed302a 100644
+--- a/elixir/WORKFLOW.md
++++ b/elixir/WORKFLOW.md
+@@ -33,3 +33,5 @@ agent:
+ codex:
+-  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
++  command: codex --config shell_environment_policy.inherit=all app-server
++  model: gpt-5.6-terra
++  reasoning_effort: medium
+   approval_policy: never
 diff --git a/elixir/lib/symphony_elixir.ex b/elixir/lib/symphony_elixir.ex
-index a08b63e624323df4ecce122edaf63b7a308215e5..81d08004e231563af620363f08d8d54ee77e2c7c 100644
+index a08b63e..81d0800 100644
 --- a/elixir/lib/symphony_elixir.ex
 +++ b/elixir/lib/symphony_elixir.ex
-@@ -37,6 +37,7 @@ defmodule SymphonyElixir.Application do
- 
-     children = [
+@@ -39,2 +39,3 @@ defmodule SymphonyElixir.Application do
        {Phoenix.PubSub, name: SymphonyElixir.PubSub},
 +      SymphonyElixir.Linear.RateLimit,
        SymphonyElixir.WorkflowStore,
-       SymphonyElixir.AgentRuntimeSupervisor,
-       SymphonyElixir.HttpServer,
+diff --git a/elixir/lib/symphony_elixir/agent_runner.ex b/elixir/lib/symphony_elixir/agent_runner.ex
+index f99a2d9..4aba893 100644
+--- a/elixir/lib/symphony_elixir/agent_runner.ex
++++ b/elixir/lib/symphony_elixir/agent_runner.ex
+@@ -6,3 +6,3 @@ defmodule SymphonyElixir.AgentRunner do
+   require Logger
+-  alias SymphonyElixir.Codex.AppServer
++  alias SymphonyElixir.Codex.{AppServer, TaskSettings}
+   alias SymphonyElixir.{Config, PromptBuilder, Tracker, Workspace}
+@@ -32,4 +32,11 @@ defmodule SymphonyElixir.AgentRunner do
+       {:error, reason} ->
+-        Logger.error("Agent run failed for #{issue_context(issue)}: #{inspect(reason)}")
+-        raise RuntimeError, "Agent run failed for #{issue_context(issue)}: #{inspect(reason)}"
++        if TaskSettings.configuration_error?(reason) do
++          Logger.warning("Agent run blocked by task Codex configuration for #{issue_context(issue)}: #{TaskSettings.format_error(reason)}")
++
++          send_task_configuration_error(codex_update_recipient, issue, TaskSettings.fingerprint(issue), reason)
++          :ok
++        else
++          Logger.error("Agent run failed for #{issue_context(issue)}: #{inspect(reason)}")
++          raise RuntimeError, "Agent run failed for #{issue_context(issue)}: #{inspect(reason)}"
++        end
+     end
+@@ -40,16 +47,57 @@ defmodule SymphonyElixir.AgentRunner do
+ 
+-    case Workspace.create_for_issue(issue, worker_host) do
+-      {:ok, workspace} ->
+-        send_worker_runtime_info(codex_update_recipient, issue, worker_host, workspace)
++    with {:ok, task_settings} <- TaskSettings.resolve(issue, Config.settings!().codex),
++         {:ok, workspace} <- Workspace.create_for_issue(issue, worker_host) do
++      Logger.info("Resolved task Codex settings for #{issue_context(issue)} model=#{inspect(task_settings.model)} reasoning_effort=#{inspect(task_settings.reasoning_effort)}")
++      send_worker_runtime_info(codex_update_recipient, issue, worker_host, workspace, task_settings)
+ 
+-        try do
+-          with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
+-            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+-          end
+-        after
+-          Workspace.run_after_run_hook(workspace, issue, worker_host)
++      try do
++        with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
++          run_codex_turns(workspace, issue, task_settings, codex_update_recipient, opts, worker_host)
+         end
++      after
++        Workspace.run_after_run_hook(workspace, issue, worker_host)
++      end
++    end
++  end
+ 
+-      {:error, reason} ->
+-        {:error, reason}
++  defp send_task_configuration_error(recipient, %Issue{id: issue_id}, fingerprint, reason)
++       when is_binary(issue_id) and is_pid(recipient) do
++    send(recipient, {:task_configuration_error, issue_id, fingerprint, reason})
++    :ok
++  end
++
++  defp send_task_configuration_error(_recipient, _issue, _fingerprint, _reason), do: :ok
++
++  defp send_worker_runtime_info(recipient, %Issue{id: issue_id}, worker_host, workspace, task_settings)
++       when is_binary(issue_id) and is_pid(recipient) and is_binary(workspace) do
++    send(
++      recipient,
++      {:worker_runtime_info, issue_id,
++       %{
++         worker_host: worker_host,
++         workspace_path: workspace,
++         model: task_settings.model,
++         reasoning_effort: task_settings.reasoning_effort
++       }}
++    )
++
++    :ok
++  end
++
++  defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace, _task_settings), do: :ok
++
++  defp run_codex_turns(workspace, issue, task_settings, codex_update_recipient, opts, worker_host) do
++    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
++    issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issues_by_ids/1)
++
++    with {:ok, session} <-
++           AppServer.start_session(workspace, issue,
++             worker_host: worker_host,
++             task_settings: task_settings
++           ) do
++      try do
++        do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
++      after
++        AppServer.stop_session(session)
++      end
+     end
+@@ -71,31 +119,2 @@ defmodule SymphonyElixir.AgentRunner do
+ 
+-  defp send_worker_runtime_info(recipient, %Issue{id: issue_id}, worker_host, workspace)
+-       when is_binary(issue_id) and is_pid(recipient) and is_binary(workspace) do
+-    send(
+-      recipient,
+-      {:worker_runtime_info, issue_id,
+-       %{
+-         worker_host: worker_host,
+-         workspace_path: workspace
+-       }}
+-    )
+-
+-    :ok
+-  end
+-
+-  defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
+-
+-  defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
+-    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
+-    issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issues_by_ids/1)
+-
+-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
+-      try do
+-        do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
+-      after
+-        AppServer.stop_session(session)
+-      end
+-    end
+-  end
+-
+   defp do_run_codex_turns(app_session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, turn_number, max_turns) do
+diff --git a/elixir/lib/symphony_elixir/codex/app_server.ex b/elixir/lib/symphony_elixir/codex/app_server.ex
+index ae3db62..4e6f262 100644
+--- a/elixir/lib/symphony_elixir/codex/app_server.ex
++++ b/elixir/lib/symphony_elixir/codex/app_server.ex
+@@ -6,3 +6,3 @@ defmodule SymphonyElixir.Codex.AppServer do
+   require Logger
+-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
++  alias SymphonyElixir.{Codex.DynamicTool, Codex.TaskSettings, Config, PathSafety, SSH}
+ 
+@@ -20,2 +20,5 @@ defmodule SymphonyElixir.Codex.AppServer do
+           turn_sandbox_policy: map(),
++          model: String.t() | nil,
++          reasoning_effort: String.t() | nil,
++          task_settings: TaskSettings.t(),
+           thread_id: String.t(),
+@@ -28,3 +31,3 @@ defmodule SymphonyElixir.Codex.AppServer do
+   def run(workspace, prompt, issue, opts \\ []) do
+-    with {:ok, session} <- start_session(workspace, opts) do
++    with {:ok, session} <- start_session(workspace, issue, opts) do
+       try do
+@@ -37,4 +40,4 @@ defmodule SymphonyElixir.Codex.AppServer do
+ 
+-  @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
+-  def start_session(workspace, opts \\ []) do
++  @spec start_session(Path.t(), map(), keyword()) :: {:ok, session()} | {:error, term()}
++  def start_session(workspace, issue, opts \\ []) when is_map(issue) do
+     worker_host = Keyword.get(opts, :worker_host)
+@@ -43,2 +46,3 @@ defmodule SymphonyElixir.Codex.AppServer do
+     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
++         {:ok, task_settings} <- resolve_task_settings(issue, opts),
+          {:ok, port} <- start_port(expanded_workspace, worker_host, dynamic_tool_binding) do
+@@ -48,3 +52,3 @@ defmodule SymphonyElixir.Codex.AppServer do
+            {:ok, thread_id} <-
+-             do_start_session(port, expanded_workspace, session_policies, dynamic_tool_binding) do
++             do_start_session(port, expanded_workspace, session_policies, task_settings, dynamic_tool_binding) do
+         {:ok,
+@@ -57,2 +61,5 @@ defmodule SymphonyElixir.Codex.AppServer do
+            turn_sandbox_policy: session_policies.turn_sandbox_policy,
++           model: task_settings.model,
++           reasoning_effort: task_settings.reasoning_effort,
++           task_settings: task_settings,
+            thread_id: thread_id,
+@@ -78,2 +85,3 @@ defmodule SymphonyElixir.Codex.AppServer do
+           turn_sandbox_policy: turn_sandbox_policy,
++          task_settings: task_settings,
+           thread_id: thread_id,
+@@ -93,3 +101,3 @@ defmodule SymphonyElixir.Codex.AppServer do
+ 
+-    case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
++    case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy, task_settings) do
+       {:ok, turn_id} ->
+@@ -138,2 +146,3 @@ defmodule SymphonyElixir.Codex.AppServer do
+       {:error, reason} ->
++        reason = maybe_task_configuration_error(reason, task_settings)
+         Logger.error("Codex session failed for #{issue_context(issue)}: #{inspect(reason)}")
+@@ -306,6 +315,19 @@ defmodule SymphonyElixir.Codex.AppServer do
+ 
+-  defp do_start_session(port, workspace, session_policies, dynamic_tool_binding) do
++  defp resolve_task_settings(issue, opts) do
++    case Keyword.fetch(opts, :task_settings) do
++      {:ok, task_settings} when is_map(task_settings) -> {:ok, task_settings}
++      :error -> TaskSettings.resolve(issue, Config.settings!().codex)
++    end
++  end
++
++  defp do_start_session(port, workspace, session_policies, task_settings, dynamic_tool_binding) do
+     case send_initialize(port) do
+-      :ok -> start_thread(port, workspace, session_policies, dynamic_tool_binding)
+-      {:error, reason} -> {:error, reason}
++      :ok ->
++        case start_thread(port, workspace, session_policies, task_settings, dynamic_tool_binding) do
++          {:error, reason} -> {:error, maybe_task_configuration_error(reason, task_settings)}
++          result -> result
++        end
++
++      {:error, reason} ->
++        {:error, reason}
+     end
+@@ -317,14 +339,23 @@ defmodule SymphonyElixir.Codex.AppServer do
+          %{approval_policy: approval_policy, thread_sandbox: thread_sandbox},
++         %{model: model},
+          dynamic_tool_binding
+        ) do
+-    send_message(port, %{
+-      "method" => "thread/start",
+-      "id" => @thread_start_id,
+-      "params" => %{
+-        "approvalPolicy" => approval_policy,
+-        "sandbox" => thread_sandbox,
+-        "cwd" => workspace,
+-        "dynamicTools" => dynamic_tool_binding.tool_specs
+-      }
+-    })
++    params = %{
++      "approvalPolicy" => approval_policy,
++      "sandbox" => thread_sandbox,
++      "cwd" => workspace,
++      "dynamicTools" => dynamic_tool_binding.tool_specs
++    }
++
++    send_message(
++      port,
++      maybe_put(params, "model", model)
++      |> then(
++        &%{
++          "method" => "thread/start",
++          "id" => @thread_start_id,
++          "params" => &1
++        }
++      )
++    )
+ 
+@@ -342,20 +373,32 @@ defmodule SymphonyElixir.Codex.AppServer do
+ 
+-  defp start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
+-    send_message(port, %{
+-      "method" => "turn/start",
+-      "id" => @turn_start_id,
+-      "params" => %{
+-        "threadId" => thread_id,
+-        "input" => [
+-          %{
+-            "type" => "text",
+-            "text" => prompt
+-          }
+-        ],
+-        "cwd" => workspace,
+-        "title" => "#{issue.identifier}: #{issue.title}",
+-        "approvalPolicy" => approval_policy,
+-        "sandboxPolicy" => turn_sandbox_policy
+-      }
+-    })
++  defp start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy, task_settings) do
++    params = %{
++      "threadId" => thread_id,
++      "input" => [
++        %{
++          "type" => "text",
++          "text" => prompt
++        }
++      ],
++      "cwd" => workspace,
++      "title" => "#{issue.identifier}: #{issue.title}",
++      "approvalPolicy" => approval_policy,
++      "sandboxPolicy" => turn_sandbox_policy
++    }
++
++    %{model: model, reasoning_effort: reasoning_effort} = task_settings
++
++    send_message(
++      port,
++      params
++      |> maybe_put("model", model)
++      |> maybe_put("effort", reasoning_effort)
++      |> then(
++        &%{
++          "method" => "turn/start",
++          "id" => @turn_start_id,
++          "params" => &1
++        }
++      )
++    )
+ 
+@@ -378,2 +421,11 @@ defmodule SymphonyElixir.Codex.AppServer do
+ 
++  defp maybe_put(params, _key, nil), do: params
++  defp maybe_put(params, key, value), do: Map.put(params, key, value)
++
++  defp maybe_task_configuration_error({:response_error, _} = reason, %{overridden?: true}) do
++    {:task_configuration_error, reason}
++  end
++
++  defp maybe_task_configuration_error(reason, _task_settings), do: reason
++
+   defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests) do
+diff --git a/elixir/lib/symphony_elixir/codex/task_settings.ex b/elixir/lib/symphony_elixir/codex/task_settings.ex
+new file mode 100644
+index 0000000..899a1de
+--- /dev/null
++++ b/elixir/lib/symphony_elixir/codex/task_settings.ex
+@@ -0,0 +1,82 @@
++defmodule SymphonyElixir.Codex.TaskSettings do
++  @moduledoc false
++
++  alias SymphonyElixir.Config.Schema.Codex
++  alias SymphonyElixir.Tracker.Issue
++
++  @type t :: %{
++          model: String.t() | nil,
++          reasoning_effort: String.t() | nil,
++          fingerprint: [String.t()],
++          overridden?: boolean()
++        }
++
++  @spec resolve(Issue.t(), Codex.t()) :: {:ok, t()} | {:error, term()}
++  def resolve(%Issue{labels: labels}, %Codex{} = defaults) when is_list(labels) do
++    with {:ok, model} <- label_value(labels, :model),
++         {:ok, reasoning_effort} <- label_value(labels, :reasoning) do
++      {:ok,
++       %{
++         model: model || defaults.model,
++         reasoning_effort: reasoning_effort || defaults.reasoning_effort,
++         fingerprint: fingerprint_from_labels(labels),
++         overridden?: not is_nil(model) or not is_nil(reasoning_effort)
++       }}
++    end
++  end
++
++  def resolve(%Issue{}, %Codex{}), do: {:error, {:invalid_task_codex_settings, :labels, :invalid}}
++
++  @spec configuration_error?(term()) :: boolean()
++  def configuration_error?({:task_configuration_error, _}), do: true
++  def configuration_error?({:invalid_task_codex_settings, _, _}), do: true
++  def configuration_error?(_), do: false
++
++  @spec fingerprint(Issue.t()) :: [String.t()]
++  def fingerprint(%Issue{labels: labels}) when is_list(labels), do: fingerprint_from_labels(labels)
++  def fingerprint(%Issue{}), do: []
++
++  @spec format_error(term()) :: String.t()
++  def format_error({:invalid_task_codex_settings, setting, :empty}) do
++    "task label #{setting}: must include a value"
++  end
++
++  def format_error({:invalid_task_codex_settings, setting, {:conflicting, values}}) do
++    "task labels #{setting}: conflict: #{Enum.join(values, ", ")}"
++  end
++
++  def format_error({:task_configuration_error, reason}) do
++    "Codex rejected the task model or reasoning configuration: #{inspect(reason)}"
++  end
++
++  def format_error(reason), do: "invalid task Codex configuration: #{inspect(reason)}"
++
++  defp label_value(labels, setting) when setting in [:model, :reasoning] do
++    prefix = Atom.to_string(setting) <> ":"
++
++    values =
++      labels
++      |> Enum.filter(&is_binary/1)
++      |> Enum.map(&String.trim/1)
++      |> Enum.filter(&String.starts_with?(&1, prefix))
++      |> Enum.map(&String.trim(String.replace_prefix(&1, prefix, "")))
++
++    if Enum.any?(values, &(&1 == "")) do
++      {:error, {:invalid_task_codex_settings, setting, :empty}}
++    else
++      case Enum.uniq(values) do
++        [] -> {:ok, nil}
++        [value] -> {:ok, value}
++        conflicting -> {:error, {:invalid_task_codex_settings, setting, {:conflicting, conflicting}}}
++      end
++    end
++  end
++
++  defp fingerprint_from_labels(labels) do
++    labels
++    |> Enum.filter(&is_binary/1)
++    |> Enum.map(&String.trim/1)
++    |> Enum.filter(&(String.starts_with?(&1, "model:") or String.starts_with?(&1, "reasoning:")))
++    |> Enum.sort()
++  end
++end
+diff --git a/elixir/lib/symphony_elixir/config.ex b/elixir/lib/symphony_elixir/config.ex
+index ae4cb0b..28a8139 100644
+--- a/elixir/lib/symphony_elixir/config.ex
++++ b/elixir/lib/symphony_elixir/config.ex
+@@ -25,3 +25,5 @@ defmodule SymphonyElixir.Config do
+           thread_sandbox: String.t(),
+-          turn_sandbox_policy: map()
++          turn_sandbox_policy: map(),
++          model: String.t() | nil,
++          reasoning_effort: String.t() | nil
+         }
+@@ -109,3 +111,5 @@ defmodule SymphonyElixir.Config do
+            thread_sandbox: settings.codex.thread_sandbox,
+-           turn_sandbox_policy: turn_sandbox_policy
++           turn_sandbox_policy: turn_sandbox_policy,
++           model: settings.codex.model,
++           reasoning_effort: settings.codex.reasoning_effort
+          }}
 diff --git a/elixir/lib/symphony_elixir/config/schema.ex b/elixir/lib/symphony_elixir/config/schema.ex
-index 6ebb278faca9e9e112058fb0817e6a7aa1201214..0628eae2d6f5bd0b30fb9cb5746cb8065baf11a4 100644
+index 6ebb278..d20d26b 100644
 --- a/elixir/lib/symphony_elixir/config/schema.ex
 +++ b/elixir/lib/symphony_elixir/config/schema.ex
-@@ -94,13 +94,15 @@ defmodule SymphonyElixir.Config.Schema do
-     @primary_key false
-     embedded_schema do
+@@ -96,2 +96,3 @@ defmodule SymphonyElixir.Config.Schema do
        field(:interval_ms, :integer, default: 30_000)
 +      field(:request_interval_ms, :integer, default: 1_500)
      end
- 
-     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
-     def changeset(schema, attrs) do
+@@ -101,4 +102,5 @@ defmodule SymphonyElixir.Config.Schema do
        schema
 -      |> cast(attrs, [:interval_ms], empty_values: [])
 +      |> cast(attrs, [:interval_ms, :request_interval_ms], empty_values: [])
        |> validate_number(:interval_ms, greater_than: 0)
 +      |> validate_number(:request_interval_ms, greater_than_or_equal_to: 0)
      end
-   end
+@@ -178,2 +180,4 @@ defmodule SymphonyElixir.Config.Schema do
  
++    @type t :: %__MODULE__{}
++
+     @primary_key false
+@@ -181,2 +185,4 @@ defmodule SymphonyElixir.Config.Schema do
+       field(:command, :string, default: "codex app-server")
++      field(:model, :string)
++      field(:reasoning_effort, :string)
+ 
+@@ -206,2 +212,4 @@ defmodule SymphonyElixir.Config.Schema do
+           :command,
++          :model,
++          :reasoning_effort,
+           :approval_policy,
+@@ -223,2 +231,4 @@ defmodule SymphonyElixir.Config.Schema do
+       end)
++      |> validate_optional_nonblank(:model)
++      |> validate_optional_nonblank(:reasoning_effort)
+       |> validate_number(:turn_timeout_ms, greater_than: 0)
+@@ -227,2 +237,8 @@ defmodule SymphonyElixir.Config.Schema do
+     end
++
++    defp validate_optional_nonblank(changeset, field) do
++      validate_change(changeset, field, fn ^field, value ->
++        if String.trim(value) == "", do: [{field, "can't be blank"}], else: []
++      end)
++    end
+   end
 diff --git a/elixir/lib/symphony_elixir/linear/client.ex b/elixir/lib/symphony_elixir/linear/client.ex
-index fb32b6078f0ad81c24685a6940b6fa63429acd23..95167bf2d88c5db6c7d998950f2b6770db984811 100644
+index fb32b60..95167bf 100644
 --- a/elixir/lib/symphony_elixir/linear/client.ex
 +++ b/elixir/lib/symphony_elixir/linear/client.ex
-@@ -5,6 +5,7 @@ defmodule SymphonyElixir.Linear.Client do
- 
-   require Logger
+@@ -7,2 +7,3 @@ defmodule SymphonyElixir.Linear.Client do
    alias SymphonyElixir.Config
 +  alias SymphonyElixir.Linear.RateLimit
    alias SymphonyElixir.Tracker.Issue
- 
-   @issue_page_size 50
-@@ -141,6 +142,12 @@ defmodule SymphonyElixir.Linear.Client do
-       when is_binary(query) and is_map(variables) and is_list(opts) do
-     payload = build_graphql_payload(query, variables, Keyword.get(opts, :operation_name))
+@@ -143,2 +144,8 @@ defmodule SymphonyElixir.Linear.Client do
      tracker_settings = Keyword.get_lazy(opts, :tracker_settings, fn -> Config.settings!().tracker end)
 +    rate_limit_server = Keyword.get(opts, :rate_limit_server, RateLimit)
 +
@@ -54,11 +517,7 @@ index fb32b6078f0ad81c24685a6940b6fa63429acd23..95167bf2d88c5db6c7d998950f2b6770
 +        configured_request_interval_ms()
 +      end)
  
-     request_fun =
-       Keyword.get(opts, :request_fun, fn request_payload, headers ->
-@@ -148,23 +155,29 @@ defmodule SymphonyElixir.Linear.Client do
-       end)
- 
+@@ -150,16 +157,16 @@ defmodule SymphonyElixir.Linear.Client do
      with {:ok, headers} <- graphql_headers(tracker_settings),
 -         {:ok, %{status: 200, body: body}} <- request_fun.(payload, headers) do
 -      {:ok, body}
@@ -88,7 +547,7 @@ index fb32b6078f0ad81c24685a6940b6fa63429acd23..95167bf2d88c5db6c7d998950f2b6770
 -        {:error, {:linear_api_request, reason}}
 +      {:error, reason} -> {:error, reason}
      end
-   end
+@@ -167,2 +174,8 @@ defmodule SymphonyElixir.Linear.Client do
  
 +  defp configured_request_interval_ms do
 +    Config.settings!().polling.request_interval_ms
@@ -97,11 +556,7 @@ index fb32b6078f0ad81c24685a6940b6fa63429acd23..95167bf2d88c5db6c7d998950f2b6770
 +  end
 +
    @doc false
-   @spec normalize_issue_for_test(map()) :: Issue.t() | nil
-   def normalize_issue_for_test(issue) when is_map(issue) do
-@@ -333,6 +346,101 @@ defmodule SymphonyElixir.Linear.Client do
- 
-   defp maybe_put_operation_name(payload, _operation_name), do: payload
+@@ -335,2 +348,97 @@ defmodule SymphonyElixir.Linear.Client do
  
 +  defp handle_error_response(payload, response, rate_limit_server) do
 +    case rate_limit_retry_after_ms(response) do
@@ -199,11 +654,9 @@ index fb32b6078f0ad81c24685a6940b6fa63429acd23..95167bf2d88c5db6c7d998950f2b6770
 +  end
 +
    defp linear_error_context(payload, response) when is_map(payload) do
-     operation_name =
-       case Map.get(payload, "operationName") do
 diff --git a/elixir/lib/symphony_elixir/linear/rate_limit.ex b/elixir/lib/symphony_elixir/linear/rate_limit.ex
 new file mode 100644
-index 0000000000000000000000000000000000000000..260463b798860e9cb8948bf44e4d1c304034f2e2
+index 0000000..260463b
 --- /dev/null
 +++ b/elixir/lib/symphony_elixir/linear/rate_limit.ex
 @@ -0,0 +1,82 @@
@@ -290,21 +743,119 @@ index 0000000000000000000000000000000000000000..260463b798860e9cb8948bf44e4d1c30
 +  defp now_ms, do: System.monotonic_time(:millisecond)
 +end
 diff --git a/elixir/lib/symphony_elixir/orchestrator.ex b/elixir/lib/symphony_elixir/orchestrator.ex
-index b52e991c08ac14d1d5c1c4e6f63e33c35f35bb8c..26697937f5bae7c27f2b7bd61140c5107989a0a6 100644
+index b52e991..fec83c0 100644
 --- a/elixir/lib/symphony_elixir/orchestrator.ex
 +++ b/elixir/lib/symphony_elixir/orchestrator.ex
-@@ -69,7 +69,7 @@ defmodule SymphonyElixir.Orchestrator do
-           codex_rate_limits: nil
-         }
+@@ -9,3 +9,3 @@ defmodule SymphonyElixir.Orchestrator do
+ 
+-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
++  alias SymphonyElixir.{AgentRunner, Codex.TaskSettings, Config, StatusDashboard, Tracker, Workspace}
+   alias SymphonyElixir.Tracker.Issue
+@@ -13,2 +13,3 @@ defmodule SymphonyElixir.Orchestrator do
+   @continuation_retry_delay_ms 1_000
++  @capacity_retry_delay_ms 1_000
+   @failure_retry_base_ms 10_000
+@@ -71,3 +72,3 @@ defmodule SymphonyElixir.Orchestrator do
  
 -        run_terminal_workspace_cleanup()
 +        start_terminal_workspace_cleanup(state.task_supervisor)
          state = schedule_tick(state, 0)
+@@ -160,2 +161,4 @@ defmodule SymphonyElixir.Orchestrator do
+           |> maybe_put_runtime_value(:workspace_path, runtime_info[:workspace_path])
++          |> maybe_put_runtime_value(:model, runtime_info[:model])
++          |> maybe_put_runtime_value(:reasoning_effort, runtime_info[:reasoning_effort])
  
-         {:ok, state}
-@@ -1174,6 +1174,16 @@ defmodule SymphonyElixir.Orchestrator do
-     end
-   end
+@@ -189,2 +192,21 @@ defmodule SymphonyElixir.Orchestrator do
+ 
++  def handle_info({:task_configuration_error, issue_id, fingerprint, reason}, %{running: running} = state)
++      when is_binary(issue_id) and is_list(fingerprint) do
++    case Map.get(running, issue_id) do
++      nil ->
++        {:noreply, state}
++
++      running_entry ->
++        error = TaskSettings.format_error(reason)
++
++        Logger.warning("Agent task blocked by Codex configuration for issue_id=#{issue_id} issue_identifier=#{running_entry.identifier}: #{error}")
++
++        state =
++          block_issue_from_entry(state, issue_id, running_entry, error, configuration_fingerprint: fingerprint)
++
++        notify_dashboard()
++        {:noreply, state}
++    end
++  end
++
+   def handle_info({:retry_issue, issue_id, retry_token}, state) do
+@@ -403,2 +425,14 @@ defmodule SymphonyElixir.Orchestrator do
+ 
++  @doc false
++  @spec new_issue_slots_available_for_test(term()) :: boolean()
++  def new_issue_slots_available_for_test(%State{} = state) do
++    new_issue_slots_available?(state)
++  end
++
++  @doc false
++  @spec retry_delay_for_test(pos_integer(), map()) :: non_neg_integer()
++  def retry_delay_for_test(attempt, metadata) do
++    retry_delay(attempt, metadata)
++  end
++
+   @doc false
+@@ -467,3 +501,8 @@ defmodule SymphonyElixir.Orchestrator do
+       active_issue_state?(issue.state, active_states) ->
+-        refresh_blocked_issue_state(state, issue)
++        if task_configuration_changed?(state, issue) do
++          Logger.info("Task Codex configuration changed for blocked issue #{issue_context(issue)}; releasing block")
++          release_issue_claim(state, issue.id)
++        else
++          refresh_blocked_issue_state(state, issue)
++        end
+ 
+@@ -756,3 +795,3 @@ defmodule SymphonyElixir.Orchestrator do
+ 
+-  defp block_issue_from_entry(%State{} = state, issue_id, running_entry, error) do
++  defp block_issue_from_entry(%State{} = state, issue_id, running_entry, error, opts \\ []) do
+     blocked_entry = %{
+@@ -763,2 +802,4 @@ defmodule SymphonyElixir.Orchestrator do
+       workspace_path: Map.get(running_entry, :workspace_path),
++      model: Map.get(running_entry, :model),
++      reasoning_effort: Map.get(running_entry, :reasoning_effort),
+       session_id: running_entry_session_id(running_entry),
+@@ -768,3 +809,4 @@ defmodule SymphonyElixir.Orchestrator do
+       last_codex_event: Map.get(running_entry, :last_codex_event),
+-      last_codex_timestamp: Map.get(running_entry, :last_codex_timestamp)
++      last_codex_timestamp: Map.get(running_entry, :last_codex_timestamp),
++      configuration_fingerprint: Keyword.get(opts, :configuration_fingerprint)
+     }
+@@ -780,2 +822,9 @@ defmodule SymphonyElixir.Orchestrator do
+ 
++  defp task_configuration_changed?(state, %Issue{} = issue) do
++    case get_in(state.blocked, [issue.id, :configuration_fingerprint]) do
++      fingerprint when is_list(fingerprint) -> fingerprint != TaskSettings.fingerprint(issue)
++      _ -> false
++    end
++  end
++
+   defp choose_issues(issues, state) do
+@@ -825,3 +874,3 @@ defmodule SymphonyElixir.Orchestrator do
+       !Map.has_key?(blocked, issue.id) and
+-      available_slots(state) > 0 and
++      new_issue_slots_available?(state) and
+       state_slots_available?(issue, running) and
+@@ -832,2 +881,6 @@ defmodule SymphonyElixir.Orchestrator do
+ 
++  defp new_issue_slots_available?(%State{} = state) do
++    available_slots(state) > map_size(state.retry_attempts)
++  end
++
+   defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
+@@ -969,2 +1022,4 @@ defmodule SymphonyElixir.Orchestrator do
+             workspace_path: nil,
++            model: nil,
++            reasoning_effort: nil,
+             session_id: nil,
+@@ -1176,2 +1231,12 @@ defmodule SymphonyElixir.Orchestrator do
  
 +  defp start_terminal_workspace_cleanup(task_supervisor) do
 +    case Task.Supervisor.start_child(task_supervisor, &run_terminal_workspace_cleanup/0) do
@@ -317,52 +868,350 @@ index b52e991c08ac14d1d5c1c4e6f63e33c35f35bb8c..26697937f5bae7c27f2b7bd61140c510
 +  end
 +
    defp notify_dashboard do
-     StatusDashboard.notify_update()
-   end
+@@ -1213,5 +1278,6 @@ defmodule SymphonyElixir.Orchestrator do
+          issue.id,
+-         attempt + 1,
++         attempt,
+          Map.merge(metadata, %{
+            identifier: issue.identifier,
++           delay_type: :capacity,
+            error: "no available orchestrator slots"
+@@ -1232,6 +1298,6 @@ defmodule SymphonyElixir.Orchestrator do
+   defp retry_delay(attempt, metadata) when is_integer(attempt) and attempt > 0 and is_map(metadata) do
+-    if metadata[:delay_type] == :continuation and attempt == 1 do
+-      @continuation_retry_delay_ms
+-    else
+-      failure_retry_delay(attempt)
++    case metadata[:delay_type] do
++      :capacity -> @capacity_retry_delay_ms
++      :continuation when attempt == 1 -> @continuation_retry_delay_ms
++      _ -> failure_retry_delay(attempt)
+     end
+@@ -1423,2 +1489,4 @@ defmodule SymphonyElixir.Orchestrator do
+           workspace_path: Map.get(metadata, :workspace_path),
++          model: Map.get(metadata, :model),
++          reasoning_effort: Map.get(metadata, :reasoning_effort),
+           session_id: metadata.session_id,
+@@ -1462,2 +1530,4 @@ defmodule SymphonyElixir.Orchestrator do
+           workspace_path: Map.get(metadata, :workspace_path),
++          model: Map.get(metadata, :model),
++          reasoning_effort: Map.get(metadata, :reasoning_effort),
+           session_id: Map.get(metadata, :session_id),
 diff --git a/elixir/test/support/test_support.exs b/elixir/test/support/test_support.exs
-index ca7c5ddfff7b812ac74e8a582eaa02ccf814cc8b..36c9db4793045f1eec981304320d0b1a8903cdb4 100644
+index ca7c5dd..b654b9e 100644
 --- a/elixir/test/support/test_support.exs
 +++ b/elixir/test/support/test_support.exs
-@@ -100,6 +100,7 @@ defmodule SymphonyElixir.TestSupport do
-           tracker_active_states: ["Todo", "In Progress"],
-           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
+@@ -102,2 +102,3 @@ defmodule SymphonyElixir.TestSupport do
            poll_interval_ms: 30_000,
 +          request_interval_ms: 0,
            workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
-           worker_ssh_hosts: [],
-           worker_max_concurrent_agents_per_host: nil,
-@@ -138,6 +139,7 @@ defmodule SymphonyElixir.TestSupport do
-     tracker_active_states = Keyword.get(config, :tracker_active_states)
-     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
+@@ -110,2 +111,4 @@ defmodule SymphonyElixir.TestSupport do
+           codex_command: "codex app-server",
++          codex_model: nil,
++          codex_reasoning_effort: nil,
+           codex_approval_policy: %{reject: %{sandbox_approval: true, rules: true, mcp_elicitations: true}},
+@@ -140,2 +143,3 @@ defmodule SymphonyElixir.TestSupport do
      poll_interval_ms = Keyword.get(config, :poll_interval_ms)
 +    request_interval_ms = Keyword.get(config, :request_interval_ms)
      workspace_root = Keyword.get(config, :workspace_root)
-     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
-     worker_max_concurrent_agents_per_host = Keyword.get(config, :worker_max_concurrent_agents_per_host)
-@@ -178,6 +180,7 @@ defmodule SymphonyElixir.TestSupport do
-         "  terminal_states: #{yaml_value(tracker_terminal_states)}",
-         "polling:",
+@@ -148,2 +152,4 @@ defmodule SymphonyElixir.TestSupport do
+     codex_command = Keyword.get(config, :codex_command)
++    codex_model = Keyword.get(config, :codex_model)
++    codex_reasoning_effort = Keyword.get(config, :codex_reasoning_effort)
+     codex_approval_policy = Keyword.get(config, :codex_approval_policy)
+@@ -180,2 +186,3 @@ defmodule SymphonyElixir.TestSupport do
          "  interval_ms: #{yaml_value(poll_interval_ms)}",
 +        "  request_interval_ms: #{yaml_value(request_interval_ms)}",
          "workspace:",
-         "  root: #{yaml_value(workspace_root)}",
-         worker_yaml(worker_ssh_hosts, worker_max_concurrent_agents_per_host),
+@@ -190,2 +197,4 @@ defmodule SymphonyElixir.TestSupport do
+         "  command: #{yaml_value(codex_command)}",
++        "  model: #{yaml_value(codex_model)}",
++        "  reasoning_effort: #{yaml_value(codex_reasoning_effort)}",
+         "  approval_policy: #{yaml_value(codex_approval_policy)}",
+diff --git a/elixir/test/symphony_elixir/app_server_test.exs b/elixir/test/symphony_elixir/app_server_test.exs
+index 4b23aed..5767d00 100644
+--- a/elixir/test/symphony_elixir/app_server_test.exs
++++ b/elixir/test/symphony_elixir/app_server_test.exs
+@@ -3,2 +3,122 @@ defmodule SymphonyElixir.AppServerTest do
+ 
++  test "app server sends task model and reasoning labels as JSON-RPC settings" do
++    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-task-settings-#{System.unique_integer([:positive])}")
++
++    try do
++      workspace_root = Path.join(test_root, "workspaces")
++      workspace = Path.join(workspace_root, "MT-SETTINGS")
++      codex_binary = Path.join(test_root, "fake-codex")
++      trace_file = Path.join(test_root, "codex.trace")
++      args_file = Path.join(test_root, "codex.args")
++      label_interpolation_marker = Path.join(test_root, "label-interpolated")
++      previous_trace = System.get_env("SYMP_TEST_CODEX_TRACE")
++      previous_args = System.get_env("SYMP_TEST_CODEX_ARGS")
++
++      on_exit(fn ->
++        if is_binary(previous_trace),
++          do: System.put_env("SYMP_TEST_CODEX_TRACE", previous_trace),
++          else: System.delete_env("SYMP_TEST_CODEX_TRACE")
++
++        if is_binary(previous_args),
++          do: System.put_env("SYMP_TEST_CODEX_ARGS", previous_args),
++          else: System.delete_env("SYMP_TEST_CODEX_ARGS")
++      end)
++
++      File.mkdir_p!(workspace)
++      System.put_env("SYMP_TEST_CODEX_TRACE", trace_file)
++      System.put_env("SYMP_TEST_CODEX_ARGS", args_file)
++
++      File.write!(codex_binary, """
++      #!/bin/sh
++      printf '%s\\n' "$@" > "$SYMP_TEST_CODEX_ARGS"
++      count=0
++      while IFS= read -r line; do
++        count=$((count + 1))
++        printf '%s\\n' "$line" >> "$SYMP_TEST_CODEX_TRACE"
++        case "$count" in
++          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
++          2) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-settings"}}}' ;;
++          3) printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-settings"}}}' ;;
++          4) printf '%s\\n' '{"method":"turn/completed"}'; exit 0 ;;
++        esac
++      done
++      """)
++
++      File.chmod!(codex_binary, 0o755)
++
++      write_workflow_file!(Workflow.workflow_file_path(),
++        workspace_root: workspace_root,
++        codex_command: "#{codex_binary} app-server",
++        codex_model: "gpt-5.6-terra",
++        codex_reasoning_effort: "medium"
++      )
++
++      issue = %Issue{
++        id: "issue-task-settings",
++        identifier: "MT-SETTINGS",
++        title: "Task settings",
++        state: "Active",
++        labels: ["model:gpt-5.6-terra; touch #{label_interpolation_marker}", "reasoning:high"]
++      }
++
++      assert {:ok, _result} = AppServer.run(workspace, "Use task settings", issue)
++
++      requests =
++        trace_file
++        |> File.read!()
++        |> String.split("\n", trim: true)
++        |> Enum.map(&Jason.decode!/1)
++
++      assert Enum.any?(requests, &(&1["method"] == "initialize"))
++
++      thread_start = Enum.find(requests, &(&1["method"] == "thread/start"))
++      turn_start = Enum.find(requests, &(&1["method"] == "turn/start"))
++
++      assert get_in(thread_start, ["params", "model"]) == "gpt-5.6-terra; touch #{label_interpolation_marker}"
++      assert get_in(turn_start, ["params", "model"]) == "gpt-5.6-terra; touch #{label_interpolation_marker}"
++      assert get_in(turn_start, ["params", "effort"]) == "high"
++      assert File.read!(args_file) == "app-server\n"
++      refute File.exists?(label_interpolation_marker)
++    after
++      File.rm_rf(test_root)
++    end
++  end
++
++  test "app server treats rejected task settings as task configuration errors" do
++    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-task-settings-error-#{System.unique_integer([:positive])}")
++
++    try do
++      workspace_root = Path.join(test_root, "workspaces")
++      workspace = Path.join(workspace_root, "MT-SETTINGS-ERROR")
++      codex_binary = Path.join(test_root, "fake-codex")
++      File.mkdir_p!(workspace)
++
++      File.write!(codex_binary, """
++      #!/bin/sh
++      count=0
++      while IFS= read -r _line; do
++        count=$((count + 1))
++        case "$count" in
++          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
++          2) printf '%s\\n' '{"id":2,"error":{"message":"unsupported model"}}'; exit 0 ;;
++        esac
++      done
++      """)
++
++      File.chmod!(codex_binary, 0o755)
++
++      write_workflow_file!(Workflow.workflow_file_path(),
++        workspace_root: workspace_root,
++        codex_command: "#{codex_binary} app-server"
++      )
++
++      issue = %Issue{id: "issue-settings-error", identifier: "MT-SETTINGS-ERROR", title: "Task settings error", labels: ["model:not-available"]}
++
++      assert {:error, {:task_configuration_error, {:response_error, %{"message" => "unsupported model"}}}} =
++               AppServer.run(workspace, "Use task settings", issue)
++    after
++      File.rm_rf(test_root)
++    end
++  end
++
+   test "app server rejects the workspace root and paths outside workspace root" do
+diff --git a/elixir/test/symphony_elixir/core_test.exs b/elixir/test/symphony_elixir/core_test.exs
+index 1263601..6af96c7 100644
+--- a/elixir/test/symphony_elixir/core_test.exs
++++ b/elixir/test/symphony_elixir/core_test.exs
+@@ -927,2 +927,33 @@ defmodule SymphonyElixir.CoreTest do
+ 
++  test "reconcile releases a task configuration block when its model or reasoning labels change" do
++    write_workflow_file!(Workflow.workflow_file_path(), tracker_active_states: ["Active"])
++
++    issue_id = "blocked-task-configuration"
++
++    state = %Orchestrator.State{
++      blocked: %{
++        issue_id => %{
++          identifier: "MT-SETTINGS",
++          error: "Codex rejected the task model or reasoning configuration",
++          configuration_fingerprint: ["model:not-available"]
++        }
++      },
++      claimed: MapSet.new([issue_id]),
++      retry_attempts: %{}
++    }
++
++    issue = %Issue{
++      id: issue_id,
++      identifier: "MT-SETTINGS",
++      title: "Correct task Codex settings",
++      state: "Active",
++      labels: ["model:gpt-5.6-terra", "reasoning:high"]
++    }
++
++    updated_state = Orchestrator.reconcile_blocked_issue_states_for_test([issue], state)
++
++    refute Map.has_key?(updated_state.blocked, issue_id)
++    refute MapSet.member?(updated_state.claimed, issue_id)
++  end
++
+   test "retry releases its claim when a required label is removed" do
+@@ -1061,2 +1092,27 @@ defmodule SymphonyElixir.CoreTest do
+ 
++  test "pending retries reserve capacity ahead of new issues" do
++    running_entry = %{worker_host: "worker-0"}
++
++    state = %Orchestrator.State{
++      max_concurrent_agents: 3,
++      running: %{"running" => running_entry},
++      retry_attempts: %{
++        "retry-1" => %{attempt: 4},
++        "retry-2" => %{attempt: 9}
++      }
++    }
++
++    refute Orchestrator.new_issue_slots_available_for_test(state)
++
++    assert Orchestrator.new_issue_slots_available_for_test(%{
++             state
++             | retry_attempts: %{"retry-1" => %{attempt: 4}}
++           })
++  end
++
++  test "capacity deferral stays prompt without consuming failure attempts" do
++    assert Orchestrator.retry_delay_for_test(12, %{delay_type: :capacity}) == 1_000
++    assert Orchestrator.retry_delay_for_test(12, %{}) == 300_000
++  end
++
+   test "abnormal worker exit increments retry attempt progressively" do
+diff --git a/elixir/test/symphony_elixir/task_settings_test.exs b/elixir/test/symphony_elixir/task_settings_test.exs
+new file mode 100644
+index 0000000..2ad5970
+--- /dev/null
++++ b/elixir/test/symphony_elixir/task_settings_test.exs
+@@ -0,0 +1,75 @@
++defmodule SymphonyElixir.Codex.TaskSettingsTest do
++  use SymphonyElixir.TestSupport
++
++  alias SymphonyElixir.Codex.TaskSettings
++  alias SymphonyElixir.Config
++
++  test "task labels inherit defaults and override model or reasoning independently" do
++    write_workflow_file!(Workflow.workflow_file_path(),
++      codex_model: "gpt-5.6-terra",
++      codex_reasoning_effort: "medium"
++    )
++
++    defaults = Config.settings!().codex
++
++    assert {:ok, %{model: "gpt-5.6-terra", reasoning_effort: "medium", overridden?: false}} =
++             TaskSettings.resolve(issue([]), defaults)
++
++    assert {:ok, %{model: "gpt-5.6-terra", reasoning_effort: "medium", overridden?: true}} =
++             TaskSettings.resolve(issue(["model:gpt-5.6-terra"]), defaults)
++
++    assert {:ok, %{model: "gpt-5.6-terra", reasoning_effort: "high", overridden?: true}} =
++             TaskSettings.resolve(issue(["reasoning:high"]), defaults)
++
++    assert {:ok, %{model: "gpt-5.6-sol", reasoning_effort: "xhigh", overridden?: true}} =
++             TaskSettings.resolve(issue([" model:gpt-5.6-sol ", " reasoning:xhigh "]), defaults)
++  end
++
++  test "task labels reject empty and conflicting Codex settings" do
++    defaults = Config.settings!().codex
++
++    assert {:error, {:invalid_task_codex_settings, :model, :empty}} =
++             TaskSettings.resolve(issue(["model:  "]), defaults)
++
++    assert {:error, {:invalid_task_codex_settings, :reasoning, :empty}} =
++             TaskSettings.resolve(issue(["reasoning:"]), defaults)
++
++    assert {:error, {:invalid_task_codex_settings, :model, {:conflicting, ["gpt-5.6-sol", "gpt-5.6-terra"]}}} =
++             TaskSettings.resolve(issue(["model:gpt-5.6-sol", "model:gpt-5.6-terra"]), defaults)
++
++    assert {:ok, %{model: "gpt-5.6-terra", overridden?: true}} =
++             TaskSettings.resolve(issue(["model:gpt-5.6-terra", "model:gpt-5.6-terra"]), defaults)
++  end
++
++  test "task configuration fingerprints include only model and reasoning labels" do
++    assert TaskSettings.fingerprint(issue(["backend", "model:gpt-5.6-terra", "reasoning:medium"])) ==
++             ["model:gpt-5.6-terra", "reasoning:medium"]
++
++    assert TaskSettings.fingerprint(issue(nil)) == []
++  end
++
++  test "task settings errors have stable diagnostics" do
++    assert {:error, {:invalid_task_codex_settings, :labels, :invalid}} =
++             TaskSettings.resolve(issue(nil), Config.settings!().codex)
++
++    assert TaskSettings.configuration_error?({:task_configuration_error, :rejected})
++    assert TaskSettings.configuration_error?({:invalid_task_codex_settings, :model, :empty})
++    refute TaskSettings.configuration_error?(:other_error)
++
++    assert TaskSettings.format_error({:invalid_task_codex_settings, :model, :empty}) ==
++             "task label model: must include a value"
++
++    assert TaskSettings.format_error({:invalid_task_codex_settings, :reasoning, {:conflicting, ["high", "low"]}}) ==
++             "task labels reasoning: conflict: high, low"
++
++    assert TaskSettings.format_error({:task_configuration_error, :rejected}) ==
++             "Codex rejected the task model or reasoning configuration: :rejected"
++
++    assert TaskSettings.format_error(:other_error) ==
++             "invalid task Codex configuration: :other_error"
++  end
++
++  defp issue(labels) do
++    %Issue{id: "issue-settings", identifier: "MT-SETTINGS", title: "Task settings", labels: labels}
++  end
++end
 diff --git a/elixir/test/symphony_elixir/workspace_and_config_test.exs b/elixir/test/symphony_elixir/workspace_and_config_test.exs
-index 15f7c368e2ccacfebd56b56c61088c0a8726db63..28c5f6eeb9188a662265b70bcf853fad251df2bf 100644
+index 15f7c36..28c5f6e 100644
 --- a/elixir/test/symphony_elixir/workspace_and_config_test.exs
 +++ b/elixir/test/symphony_elixir/workspace_and_config_test.exs
-@@ -3,7 +3,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
-   alias Ecto.Changeset
-   alias SymphonyElixir.Config.Schema
+@@ -5,3 +5,3 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
    alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
 -  alias SymphonyElixir.Linear.Client
 +  alias SymphonyElixir.Linear.{Client, RateLimit}
  
-   test "workspace bootstrap can be implemented in after_create hook" do
-     test_root =
-@@ -1668,4 +1668,129 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
-       File.rm_rf(test_root)
-     end
+@@ -1670,2 +1670,127 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
    end
 +
 +  test "linear client normalizes rate limits and shares the cooldown" do
@@ -490,116 +1339,3 @@ index 15f7c368e2ccacfebd56b56c61088c0a8726db63..28c5f6eeb9188a662265b70bcf853fad
 +             )
 +  end
  end
-diff --git a/elixir/lib/symphony_elixir/orchestrator.ex b/elixir/lib/symphony_elixir/orchestrator.ex
-index 26697937f5bae7c27f2b7bd61140c5107989a0a6..1ad4170f8c4ceb25d53595bdbb432114e3bea97b 100644
---- a/elixir/lib/symphony_elixir/orchestrator.ex
-+++ b/elixir/lib/symphony_elixir/orchestrator.ex
-@@ -11,6 +11,7 @@ defmodule SymphonyElixir.Orchestrator do
-   alias SymphonyElixir.Tracker.Issue
-
-   @continuation_retry_delay_ms 1_000
-+  @capacity_retry_delay_ms 1_000
-   @failure_retry_base_ms 10_000
-   # Slightly above the dashboard render interval so "checking now…" can render.
-   @poll_transition_render_delay_ms 20
-@@ -401,6 +402,18 @@ defmodule SymphonyElixir.Orchestrator do
-     sort_issues_for_dispatch(issues)
-   end
-
-+  @doc false
-+  @spec new_issue_slots_available_for_test(term()) :: boolean()
-+  def new_issue_slots_available_for_test(%State{} = state) do
-+    new_issue_slots_available?(state)
-+  end
-+
-+  @doc false
-+  @spec retry_delay_for_test(pos_integer(), map()) :: non_neg_integer()
-+  def retry_delay_for_test(attempt, metadata) do
-+    retry_delay(attempt, metadata)
-+  end
-+
-   @doc false
-   @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
-   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
-@@ -823,13 +836,17 @@ defmodule SymphonyElixir.Orchestrator do
-       !MapSet.member?(claimed, issue.id) and
-       !Map.has_key?(running, issue.id) and
-       !Map.has_key?(blocked, issue.id) and
--      available_slots(state) > 0 and
-+      new_issue_slots_available?(state) and
-       state_slots_available?(issue, running) and
-       worker_slots_available?(state)
-   end
-
-   defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
-
-+  defp new_issue_slots_available?(%State{} = state) do
-+    available_slots(state) > map_size(state.retry_attempts)
-+  end
-+
-   defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
-     limit = Config.max_concurrent_agents_for_state(issue_state)
-     used = running_issue_count_for_state(running, issue_state)
-@@ -1221,9 +1238,10 @@ defmodule SymphonyElixir.Orchestrator do
-        schedule_issue_retry(
-          state,
-          issue.id,
--         attempt + 1,
-+         attempt,
-          Map.merge(metadata, %{
-            identifier: issue.identifier,
-+           delay_type: :capacity,
-            error: "no available orchestrator slots"
-          })
-        )}
-@@ -1240,10 +1258,10 @@ defmodule SymphonyElixir.Orchestrator do
-   end
-
-   defp retry_delay(attempt, metadata) when is_integer(attempt) and attempt > 0 and is_map(metadata) do
--    if metadata[:delay_type] == :continuation and attempt == 1 do
--      @continuation_retry_delay_ms
--    else
--      failure_retry_delay(attempt)
-+    case metadata[:delay_type] do
-+      :capacity -> @capacity_retry_delay_ms
-+      :continuation when attempt == 1 -> @continuation_retry_delay_ms
-+      _ -> failure_retry_delay(attempt)
-     end
-   end
-
-diff --git a/elixir/test/symphony_elixir/core_test.exs b/elixir/test/symphony_elixir/core_test.exs
-index 1263601cdcc106b92a371084fef0198926ac5846..50e285105eb267b719a48ccb7ba11bffca4817ea 100644
---- a/elixir/test/symphony_elixir/core_test.exs
-+++ b/elixir/test/symphony_elixir/core_test.exs
-@@ -1059,6 +1059,31 @@ defmodule SymphonyElixir.CoreTest do
-     assert_due_in_range(due_at_ms, 500, 1_100)
-   end
-
-+  test "pending retries reserve capacity ahead of new issues" do
-+    running_entry = %{worker_host: "worker-0"}
-+
-+    state = %Orchestrator.State{
-+      max_concurrent_agents: 3,
-+      running: %{"running" => running_entry},
-+      retry_attempts: %{
-+        "retry-1" => %{attempt: 4},
-+        "retry-2" => %{attempt: 9}
-+      }
-+    }
-+
-+    refute Orchestrator.new_issue_slots_available_for_test(state)
-+
-+    assert Orchestrator.new_issue_slots_available_for_test(%{
-+             state
-+             | retry_attempts: %{"retry-1" => %{attempt: 4}}
-+           })
-+  end
-+
-+  test "capacity deferral stays prompt without consuming failure attempts" do
-+    assert Orchestrator.retry_delay_for_test(12, %{delay_type: :capacity}) == 1_000
-+    assert Orchestrator.retry_delay_for_test(12, %{}) == 300_000
-+  end
-+
-   test "abnormal worker exit increments retry attempt progressively" do
-     issue_id = "issue-crash"
-     ref = make_ref()
