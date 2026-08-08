@@ -33,10 +33,10 @@ spec:
   orchestrator:
     resources:
       requests:
-        cpu: 100m
+        cpu: "2"
         memory: 3Gi
       limits:
-        cpu: "1"
+        cpu: "4"
         memory: 6Gi
     node_selector:
       doks.digitalocean.com/node-pool: symphony-control

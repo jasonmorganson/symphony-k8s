@@ -14,3 +14,4 @@ resources:
   - worker-statefulset.yaml
   - worker-pdb.yaml
   - networkpolicy.yaml
+  - observability-diagnostics.yaml
