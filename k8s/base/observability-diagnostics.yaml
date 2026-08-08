@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: symphony-observability-diagnostics
+  namespace: symphony
+  labels:
+    app.kubernetes.io/name: symphony
+    app.kubernetes.io/component: observability
+data:
+  check.sh: |
+    #!/bin/sh
+    # Read-only, operator-invoked diagnostics. Requires kubectl and namespace access.
+    set -eu
+
+    namespace="${NAMESPACE:-symphony}"
+    selector="${POD_SELECTOR:-app in (symphony-orchestrator,symphony-worker)}"
+
+    echo "== workloads =="
+    kubectl -n "$namespace" get deployment/symphony-orchestrator \
+      statefulset/symphony-worker
+
+    echo "== pods =="
+    kubectl -n "$namespace" get pods -l "$selector" -o wide
+
+    echo "== service endpoints =="
+    kubectl -n "$namespace" get endpoints symphony-orchestrator \
+      -o custom-columns='NAME:.metadata.name,READY:.subsets[*].addresses[*].ip,PORTS:.subsets[*].ports[*].port'
+
+    echo "== warning events =="
+    kubectl -n "$namespace" get events \
+      --field-selector=type=Warning \
+      --sort-by=.metadata.creationTimestamp
