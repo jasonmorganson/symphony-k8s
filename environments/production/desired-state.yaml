@@ -6,7 +6,7 @@ spec:
   namespace: symphony
   symphony:
     repository: https://github.com/jasonmorganson/symphony.git
-    revision: 67c1cd54a298d072a9a522f1df54f9b915d8e8ee
+    revision: bd77c48d5800e9a849eeb2bf2aa29cf06abb121e
     upstream_repository: https://github.com/openai/symphony.git
     upstream_revision: f8e8b8a670c799f6e0ade7a8c25c4bf4a4a56ec7
   workflow:
