@@ -68,14 +68,14 @@ spec:
               containerPort: 4000
           startupProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
             failureThreshold: 360
             periodSeconds: 5
             timeoutSeconds: 10
           readinessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
             periodSeconds: 10
             timeoutSeconds: 10
@@ -88,11 +88,9 @@ spec:
                   - -c
                   - sleep 15
           livenessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - kill -0 1
+            httpGet:
+              path: /healthz
+              port: http
             periodSeconds: 30
             timeoutSeconds: 2
             failureThreshold: 6
