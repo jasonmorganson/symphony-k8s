@@ -30,6 +30,9 @@ spec:
         memory: 6Gi
     node_selector:
       doks.digitalocean.com/node-pool: symphony-ha
+    node_pool:
+      min_nodes: 3
+      max_nodes: 7
   orchestrator:
     resources:
       requests:

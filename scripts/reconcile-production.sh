@@ -31,42 +31,67 @@ image_revision="$(value spec.images.built_from_symphony_revision)"
   exit 1
 }
 
-preflight_worker_capacity() {
-  local worker_pool cluster
-  worker_pool="$(ruby -ryaml -e '
+reconcile_worker_pool() {
+  local worker_pool minimum maximum cluster pool_state
+  read -r worker_pool minimum maximum < <(ruby -ryaml -e '
     desired=YAML.safe_load(File.read(ARGV.fetch(0)))
     selector=desired.dig("spec", "workers", "node_selector")
     abort "workers.node_selector must select a DigitalOcean node pool" unless selector.is_a?(Hash)
     pool=selector["doks.digitalocean.com/node-pool"]
     abort "workers.node_selector must set doks.digitalocean.com/node-pool" unless pool.is_a?(String) && !pool.empty?
-    print pool
-  ' "$desired")"
+    bounds=desired.dig("spec", "workers", "node_pool")
+    abort "workers.node_pool must declare autoscaling bounds" unless bounds.is_a?(Hash)
+    minimum=Integer(bounds.fetch("min_nodes"))
+    maximum=Integer(bounds.fetch("max_nodes"))
+    abort "workers.node_pool min_nodes must be non-negative" if minimum.negative?
+    abort "workers.node_pool max_nodes must be at least min_nodes" if maximum < minimum
+    abort "workers replicas exceed the committed node-pool maximum" if Integer(desired.dig("spec", "workers", "replicas")) > maximum
+    puts [pool, minimum, maximum].join(" ")
+  ' "$desired")
   cluster="${SYMPHONY_CLUSTER_NAME:-symphony-k8s}"
 
-  doctl kubernetes cluster get "$cluster" -o json | ruby -rjson -e '
+  pool_state="$(doctl kubernetes cluster get "$cluster" -o json | ruby -rjson -e '
     clusters=JSON.parse(STDIN.read)
     cluster=clusters.is_a?(Array) ? clusters.fetch(0) : clusters
-    pool_name, target=ARGV
-    target=Integer(target)
+    pool_name, minimum, maximum=ARGV
+    minimum=Integer(minimum)
+    maximum=Integer(maximum)
     pool=(cluster.fetch("node_pools") || []).find { |candidate| candidate["name"] == pool_name }
     abort "worker capacity preflight: node pool #{pool_name.inspect} was not found in cluster #{cluster.fetch("name", "unknown").inspect}" unless pool
 
     autoscaling=pool.fetch("auto_scale", false)
-    configured_nodes=Integer(pool.fetch("count"))
-    maximum=autoscaling ? Integer(pool.fetch("max_nodes")) : configured_nodes
-    abort "worker capacity preflight: node pool #{pool_name.inspect} has invalid maximum #{maximum}" if maximum < 0
+    current_minimum=pool["min_nodes"]
+    current_maximum=pool["max_nodes"]
+    puts autoscaling && current_minimum == minimum && current_maximum == maximum ? "converged" : "drifted"
+  ' "$worker_pool" "$minimum" "$maximum")"
 
-    if target > maximum
-      mode=autoscaling ? "autoscaling maximum" : "fixed node count (autoscaling disabled)"
-      abort "worker capacity preflight: desired #{target} workers exceeds the #{pool_name} schedulable-node #{mode} of #{maximum}; raise the pool bound or lower spec.workers.replicas"
-    end
-  ' "$worker_pool" "$target"
+  if [[ "$pool_state" == drifted ]]; then
+    doctl kubernetes cluster node-pool update "$cluster" "$worker_pool" \
+      --auto-scale --min-nodes "$minimum" --max-nodes "$maximum" >/dev/null
+  fi
+
+  for _ in {1..30}; do
+    if doctl kubernetes cluster get "$cluster" -o json | ruby -rjson -e '
+      clusters=JSON.parse(STDIN.read)
+      cluster=clusters.is_a?(Array) ? clusters.fetch(0) : clusters
+      pool_name, minimum, maximum=ARGV
+      pool=(cluster.fetch("node_pools") || []).find { |candidate| candidate["name"] == pool_name }
+      abort "worker pool #{pool_name.inspect} disappeared during reconciliation" unless pool
+      exit(pool["auto_scale"] && pool["min_nodes"] == Integer(minimum) && pool["max_nodes"] == Integer(maximum) ? 0 : 1)
+    ' "$worker_pool" "$minimum" "$maximum"; then
+      return 0
+    fi
+    sleep 10
+  done
+
+  echo "worker node pool did not converge to committed autoscaling bounds" >&2
+  return 1
 }
 
-# Check the selected pool's provider capacity bound before rendering or mutating
-# any Kubernetes resource. This fails closed rather than waiting for workers to
-# become Pending after a capacity increase.
-preflight_worker_capacity
+# Reconcile the provider-owned autoscaling bounds before rendering or mutating
+# Kubernetes resources. This makes worker capacity reviewable and prevents a
+# stale DigitalOcean ceiling from leaving committed workers Pending.
+reconcile_worker_pool
 
 bash "$repo_root/scripts/render-production.sh" "$desired" "$workflow_checkout" "$temporary/production.yaml"
 
