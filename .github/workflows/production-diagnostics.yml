@@ -1,6 +1,10 @@
 name: Diagnose Symphony production
 
 on:
+  schedule:
+    # A failed run is the low-risk alert surface: GitHub Actions reports the
+    # scheduled workflow failure without granting an in-cluster identity.
+    - cron: "43 * * * *"
   workflow_dispatch:
     inputs:
       probe_codex:
@@ -30,7 +34,10 @@ jobs:
           doctl kubernetes cluster kubeconfig save \
             --expiry-seconds 600 \
             symphony-k8s >/dev/null
+      - name: Monitor production health
+        run: bash scripts/monitor-production.sh
       - name: Collect non-secret runtime diagnostics
+        if: always()
         run: |
           set -euo pipefail
 
