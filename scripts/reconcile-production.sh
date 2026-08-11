@@ -167,6 +167,29 @@ if [[ -n "$worker_json" ]]; then
   fi
 fi
 
+# Server-side apply cannot remove a mutually exclusive probe handler that was
+# previously owned in the live Deployment. Remove the retired exec handler
+# before applying the health endpoint probe, or Kubernetes rejects the update
+# as an invalid multi-handler liveness probe.
+orchestrator_json="$(kubectl -n "$namespace" get deployment symphony-orchestrator -o json)"
+orchestrator_probe_patch="$(ruby -rjson -e '
+  object=JSON.parse(STDIN.read)
+  containers=object.dig("spec", "template", "spec", "containers") || []
+  indexes=containers.each_index.select { |index| containers[index]["name"] == "orchestrator" }
+  abort "expected one orchestrator container" unless indexes.one?
+  index=indexes.first
+  probe=containers[index]["livenessProbe"] || {}
+  if probe.key?("exec")
+    puts JSON.generate([
+      {"op" => "test", "path" => "/spec/template/spec/containers/#{index}/name", "value" => "orchestrator"},
+      {"op" => "remove", "path" => "/spec/template/spec/containers/#{index}/livenessProbe/exec"}
+    ])
+  end
+' <<<"$orchestrator_json")"
+if [[ -n "$orchestrator_probe_patch" ]]; then
+  kubectl -n "$namespace" patch deployment symphony-orchestrator --type=json -p "$orchestrator_probe_patch"
+fi
+
 current="$(kubectl -n "$namespace" get statefulset symphony-worker --ignore-not-found -o jsonpath='{.spec.replicas}')"
 current="${current:-0}"
 
