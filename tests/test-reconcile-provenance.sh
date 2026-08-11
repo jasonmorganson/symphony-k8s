@@ -24,6 +24,35 @@ if bash "$ROOT_DIR/scripts/reconcile-production.sh" \
 fi
 grep -q 'published images do not yet prove the desired Symphony revision' "$output"
 
+capacity_desired="$tmpdir/capacity-desired-state.yaml"
+cp "$ROOT_DIR/environments/production/desired-state.yaml" "$capacity_desired"
+ruby -ryaml -e '
+  path, workflow_checkout = ARGV
+  desired = YAML.safe_load(File.read(path))
+  desired["spec"]["images"]["built_from_symphony_revision"] = desired.dig("spec", "symphony", "revision")
+  desired["spec"]["workflow"]["revision"] = `git -C #{workflow_checkout} rev-parse HEAD`.strip
+  File.write(path, YAML.dump(desired))
+' "$capacity_desired" "$ROOT_DIR"
+fake_bin="$tmpdir/bin"
+mkdir "$fake_bin"
+cat >"$fake_bin/doctl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == 'kubernetes cluster get symphony-k8s -o json' ]] || exit 64
+printf '%s\n' '{"name":"symphony-k8s","node_pools":[{"name":"symphony-ha","count":3,"auto_scale":true,"min_nodes":0,"max_nodes":6}]}'
+EOF
+chmod +x "$fake_bin/doctl"
+
+if PATH="$fake_bin:$PATH" bash "$ROOT_DIR/scripts/reconcile-production.sh" \
+    "$capacity_desired" \
+    "$ROOT_DIR" >"$output" 2>&1; then
+  echo "reconciliation accepted worker capacity beyond the node-pool autoscaling bound" >&2
+  exit 1
+fi
+grep -q 'worker capacity preflight: desired 7 workers exceeds' "$output"
+grep -q 'autoscaling maximum of 6' "$output"
+grep -q 'raise the pool bound or lower spec.workers.replicas' "$output"
+
 apply_count="$(grep -c 'kubectl apply --server-side' "$ROOT_DIR/scripts/reconcile-production.sh")"
 [[ "$apply_count" == 1 ]] || {
   echo "production reconciliation bypasses the centralized GitOps field manager" >&2

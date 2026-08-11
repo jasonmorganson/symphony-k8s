@@ -31,6 +31,43 @@ image_revision="$(value spec.images.built_from_symphony_revision)"
   exit 1
 }
 
+preflight_worker_capacity() {
+  local worker_pool cluster
+  worker_pool="$(ruby -ryaml -e '
+    desired=YAML.safe_load(File.read(ARGV.fetch(0)))
+    selector=desired.dig("spec", "workers", "node_selector")
+    abort "workers.node_selector must select a DigitalOcean node pool" unless selector.is_a?(Hash)
+    pool=selector["doks.digitalocean.com/node-pool"]
+    abort "workers.node_selector must set doks.digitalocean.com/node-pool" unless pool.is_a?(String) && !pool.empty?
+    print pool
+  ' "$desired")"
+  cluster="${SYMPHONY_CLUSTER_NAME:-symphony-k8s}"
+
+  doctl kubernetes cluster get "$cluster" -o json | ruby -rjson -e '
+    clusters=JSON.parse(STDIN.read)
+    cluster=clusters.is_a?(Array) ? clusters.fetch(0) : clusters
+    pool_name, target=ARGV
+    target=Integer(target)
+    pool=(cluster.fetch("node_pools") || []).find { |candidate| candidate["name"] == pool_name }
+    abort "worker capacity preflight: node pool #{pool_name.inspect} was not found in cluster #{cluster.fetch("name", "unknown").inspect}" unless pool
+
+    autoscaling=pool.fetch("auto_scale", false)
+    configured_nodes=Integer(pool.fetch("count"))
+    maximum=autoscaling ? Integer(pool.fetch("max_nodes")) : configured_nodes
+    abort "worker capacity preflight: node pool #{pool_name.inspect} has invalid maximum #{maximum}" if maximum < 0
+
+    if target > maximum
+      mode=autoscaling ? "autoscaling maximum" : "fixed node count (autoscaling disabled)"
+      abort "worker capacity preflight: desired #{target} workers exceeds the #{pool_name} schedulable-node #{mode} of #{maximum}; raise the pool bound or lower spec.workers.replicas"
+    end
+  ' "$worker_pool" "$target"
+}
+
+# Check the selected pool's provider capacity bound before rendering or mutating
+# any Kubernetes resource. This fails closed rather than waiting for workers to
+# become Pending after a capacity increase.
+preflight_worker_capacity
+
 bash "$repo_root/scripts/render-production.sh" "$desired" "$workflow_checkout" "$temporary/production.yaml"
 
 ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0])).dig("spec","secrets","references").each { |name| puts name }' "$desired" |
