@@ -71,6 +71,7 @@ grep -q -- 'delete statefulset symphony-worker --cascade=orphan --wait=true' \
   "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'init-workspace-permissions' "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'livenessProbe/exec' "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'livenessProbe/httpGet' "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'patch deployment symphony-orchestrator --type=json' "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'ServerAliveInterval 10' "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
 grep -q -- 'ServerAliveCountMax 3' "$ROOT_DIR/k8s/base/orchestrator-deployment.yaml"
