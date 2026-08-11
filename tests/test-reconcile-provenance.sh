@@ -31,6 +31,8 @@ ruby -ryaml -e '
   desired = YAML.safe_load(File.read(path))
   desired["spec"]["images"]["built_from_symphony_revision"] = desired.dig("spec", "symphony", "revision")
   desired["spec"]["workflow"]["revision"] = `git -C #{workflow_checkout} rev-parse HEAD`.strip
+  desired["spec"]["workers"]["node_pool"]["min_nodes"] = 0
+  desired["spec"]["workers"]["node_pool"]["max_nodes"] = 6
   File.write(path, YAML.dump(desired))
 ' "$capacity_desired" "$ROOT_DIR"
 fake_bin="$tmpdir/bin"
@@ -49,9 +51,7 @@ if PATH="$fake_bin:$PATH" bash "$ROOT_DIR/scripts/reconcile-production.sh" \
   echo "reconciliation accepted worker capacity beyond the node-pool autoscaling bound" >&2
   exit 1
 fi
-grep -q 'worker capacity preflight: desired 7 workers exceeds' "$output"
-grep -q 'autoscaling maximum of 6' "$output"
-grep -q 'raise the pool bound or lower spec.workers.replicas' "$output"
+grep -q 'workers replicas exceed the committed node-pool maximum' "$output"
 
 apply_count="$(grep -c 'kubectl apply --server-side' "$ROOT_DIR/scripts/reconcile-production.sh")"
 [[ "$apply_count" == 1 ]] || {
@@ -70,6 +70,8 @@ grep -q -- 'unknown legacy worker volume claims; refusing recreation' \
 grep -q -- 'delete statefulset symphony-worker --cascade=orphan --wait=true' \
   "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'init-workspace-permissions' "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'node-pool update' "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'workers.node_pool must declare autoscaling bounds' "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'livenessProbe/exec' "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'livenessProbe/httpGet' "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'patch deployment symphony-orchestrator --type=json' "$ROOT_DIR/scripts/reconcile-production.sh"

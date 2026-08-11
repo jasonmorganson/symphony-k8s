@@ -22,7 +22,7 @@ assert_keys!(spec, %w[namespace symphony workflow images workers orchestrator se
 assert_keys!(spec.fetch("symphony"), %w[repository revision upstream_repository upstream_revision], "spec.symphony")
 assert_keys!(spec.fetch("workflow"), %w[repository path revision], "spec.workflow")
 assert_keys!(spec.fetch("images"), %w[built_from_symphony_revision orchestrator worker], "spec.images")
-assert_keys!(spec.fetch("workers"), %w[replicas capacity_per_worker workspace_root resources node_selector], "spec.workers")
+assert_keys!(spec.fetch("workers"), %w[replicas capacity_per_worker workspace_root resources node_selector node_pool], "spec.workers")
 assert_keys!(spec.fetch("orchestrator"), %w[resources node_selector], "spec.orchestrator")
 assert_keys!(spec.fetch("server"), %w[host port], "spec.server")
 assert_keys!(spec.fetch("secrets"), %w[references], "spec.secrets")
@@ -31,8 +31,15 @@ assert_keys!(spec.fetch("networking"), %w[cloudflare_tunnel_secret], "spec.netwo
 workers = spec.fetch("workers")
 replicas = Integer(workers.fetch("replicas"))
 capacity = Integer(workers.fetch("capacity_per_worker"))
+node_pool = workers.fetch("node_pool")
+assert_keys!(node_pool, %w[min_nodes max_nodes], "spec.workers.node_pool")
+minimum_nodes = Integer(node_pool.fetch("min_nodes"))
+maximum_nodes = Integer(node_pool.fetch("max_nodes"))
 abort "workers.replicas must be between 1 and 100" unless (1..100).cover?(replicas)
 abort "capacity_per_worker must be positive" unless capacity.positive?
+abort "workers.node_pool min_nodes must be non-negative" if minimum_nodes.negative?
+abort "workers.node_pool max_nodes must be at least min_nodes" if maximum_nodes < minimum_nodes
+abort "workers replicas exceed the committed node-pool maximum" if replicas > maximum_nodes
 
 revision_pattern = /\A[0-9a-f]{40}\z/
 symphony_revision = spec.dig("symphony", "revision")
