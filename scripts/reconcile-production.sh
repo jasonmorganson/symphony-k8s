@@ -182,6 +182,7 @@ orchestrator_probe_patch="$(ruby -rjson -e '
   if probe.key?("exec")
     puts JSON.generate([
       {"op" => "test", "path" => "/spec/template/spec/containers/#{index}/name", "value" => "orchestrator"},
+      {"op" => "add", "path" => "/spec/template/spec/containers/#{index}/livenessProbe/httpGet", "value" => {"path" => "/healthz", "port" => "http"}},
       {"op" => "remove", "path" => "/spec/template/spec/containers/#{index}/livenessProbe/exec"}
     ])
   end
