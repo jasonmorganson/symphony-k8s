@@ -21,6 +21,12 @@ grep -q 'name: symphony-worker' "$output"
 grep -q 'type: Recreate' "$output"
 grep -q 'progressDeadlineSeconds: 2100' "$output"
 grep -q 'failureThreshold: 360' "$output"
+ruby -ryaml -e '
+  deployment = YAML.load_stream(File.read(ARGV.fetch(0))).compact.find { |document| document["kind"] == "Deployment" && document.dig("metadata", "name") == "symphony-orchestrator" }
+  proxy = deployment.dig("spec", "template", "spec", "containers").find { |container| container["name"] == "dashboard-proxy" }
+  abort "dashboard proxy must not redeclare the shared port" if proxy.key?("ports")
+  abort "dashboard proxy readiness must use its numeric listener port" unless proxy.dig("readinessProbe", "tcpSocket", "port") == 4000
+' "$output"
 if grep -Eq 'symphony-autoscaler|workspace-reclaimer|volumeClaimTemplates|workflow-throughput-overlay' "$output"; then
   echo "removed controller or durable workspace leaked into Kustomize output" >&2
   exit 1
