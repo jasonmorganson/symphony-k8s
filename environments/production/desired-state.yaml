@@ -14,9 +14,9 @@ spec:
     path: WORKFLOW.md
     revision: d44b6a22c01d3cc1c685d0e10f1f1a24322fa2c4
   images:
-    built_from_symphony_revision: 67c1cd54a298d072a9a522f1df54f9b915d8e8ee
-    orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:f66b045ee57374eec1dc0add6219c250cc76b7af4931c73d1a08db1359834cb5
-    worker: ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:9c9c3e4d41b42fd314d24519e66f9aa8b6b5d769d2f19fdd5bb0e38c89b38d9c
+    built_from_symphony_revision: bd77c48d5800e9a849eeb2bf2aa29cf06abb121e
+    orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:a102715003173717f17b17cacd74cfc41275b4ded7738f1bd1713b912d1d3254
+    worker: ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:1a72392f97acd2acdfe1e520a39456b3d916d918b122f0011fff646887994ae8
   workers:
     replicas: 7
     capacity_per_worker: 1
