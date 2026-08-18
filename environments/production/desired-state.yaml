@@ -18,7 +18,7 @@ spec:
     orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:a102715003173717f17b17cacd74cfc41275b4ded7738f1bd1713b912d1d3254
     worker: ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:1a72392f97acd2acdfe1e520a39456b3d916d918b122f0011fff646887994ae8
   workers:
-    replicas: 7
+    replicas: 3
     capacity_per_worker: 1
     workspace_root: /srv/symphony/workspaces
     resources:
@@ -31,8 +31,8 @@ spec:
     node_selector:
       doks.digitalocean.com/node-pool: symphony-ha
     node_pool:
-      min_nodes: 3
-      max_nodes: 7
+      min_nodes: 0
+      max_nodes: 3
   orchestrator:
     resources:
       requests:
