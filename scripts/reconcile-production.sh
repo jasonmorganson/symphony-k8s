@@ -88,11 +88,6 @@ reconcile_worker_pool() {
   return 1
 }
 
-# Reconcile the provider-owned autoscaling bounds before rendering or mutating
-# Kubernetes resources. This makes worker capacity reviewable and prevents a
-# stale DigitalOcean ceiling from leaving committed workers Pending.
-reconcile_worker_pool
-
 bash "$repo_root/scripts/render-production.sh" "$desired" "$workflow_checkout" "$temporary/production.yaml"
 
 ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0])).dig("spec","secrets","references").each { |name| puts name }' "$desired" |
@@ -220,6 +215,8 @@ current="$(kubectl -n "$namespace" get statefulset symphony-worker --ignore-not-
 current="${current:-0}"
 
 if (( target > current )); then
+  # Scale the provider first only when additional worker nodes are needed.
+  reconcile_worker_pool
   ruby "$repo_root/scripts/extract-resource.rb" "$temporary/production.yaml" StatefulSet symphony-worker "$temporary/workers.yaml"
   apply_committed "$temporary/workers.yaml"
   kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
@@ -253,6 +250,8 @@ fi
 apply_committed "$temporary/production.yaml"
 kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
 wait_for_worker_convergence
+# Shrink provider capacity only after the committed worker target is Ready.
+reconcile_worker_pool
 kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=40m
 
 ready="$(kubectl -n "$namespace" get statefulset symphony-worker -o jsonpath='{.status.readyReplicas}')"
