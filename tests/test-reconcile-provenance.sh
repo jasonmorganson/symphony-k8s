@@ -33,6 +33,7 @@ ruby -ryaml -e '
   desired["spec"]["workflow"]["revision"] = `git -C #{workflow_checkout} rev-parse HEAD`.strip
   desired["spec"]["workers"]["node_pool"]["min_nodes"] = 0
   desired["spec"]["workers"]["node_pool"]["max_nodes"] = 6
+  desired["spec"]["workers"]["replicas"] = 7
   File.write(path, YAML.dump(desired))
 ' "$capacity_desired" "$ROOT_DIR"
 fake_bin="$tmpdir/bin"
