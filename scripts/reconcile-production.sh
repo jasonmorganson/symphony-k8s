@@ -60,7 +60,7 @@ reconcile_worker_pool() {
     abort "worker capacity preflight: node pool #{pool_name.inspect} was not found in cluster #{cluster.fetch("name", "unknown").inspect}" unless pool
 
     autoscaling=pool.fetch("auto_scale", false)
-    current_minimum=pool["min_nodes"]
+    current_minimum=pool["min_nodes"] || 0
     current_maximum=pool["max_nodes"]
     puts autoscaling && current_minimum == minimum && current_maximum == maximum ? "converged" : "drifted"
   ' "$worker_pool" "$minimum" "$maximum")"
@@ -77,7 +77,7 @@ reconcile_worker_pool() {
       pool_name, minimum, maximum=ARGV
       pool=(cluster.fetch("node_pools") || []).find { |candidate| candidate["name"] == pool_name }
       abort "worker pool #{pool_name.inspect} disappeared during reconciliation" unless pool
-      exit(pool["auto_scale"] && pool["min_nodes"] == Integer(minimum) && pool["max_nodes"] == Integer(maximum) ? 0 : 1)
+      exit(pool["auto_scale"] && (pool["min_nodes"] || 0) == Integer(minimum) && pool["max_nodes"] == Integer(maximum) ? 0 : 1)
     ' "$worker_pool" "$minimum" "$maximum"; then
       return 0
     fi
