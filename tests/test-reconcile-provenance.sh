@@ -82,6 +82,12 @@ grep -q -- 'ServerAliveCountMax 3' "$ROOT_DIR/k8s/base/orchestrator-deployment.y
   echo "worker reconciliation does not consistently wait for actual convergence" >&2
   exit 1
 }
+final_apply_line="$(grep -n 'apply_committed "\$temporary/production.yaml"' "$ROOT_DIR/scripts/reconcile-production.sh" | cut -d: -f1)"
+provider_reconcile_line="$(grep -n '^reconcile_worker_pool$' "$ROOT_DIR/scripts/reconcile-production.sh" | tail -n 1 | cut -d: -f1)"
+[[ "$provider_reconcile_line" -gt "$final_apply_line" ]] || {
+  echo "provider capacity shrinks before committed worker convergence" >&2
+  exit 1
+}
 grep -q -- 'status\["currentRevision"\] == status\["updateRevision"\]' \
   "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'workflow_dispatch:' "$ROOT_DIR/.github/workflows/validate.yml"
