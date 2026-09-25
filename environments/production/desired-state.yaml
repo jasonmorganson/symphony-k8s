@@ -12,7 +12,7 @@ spec:
   workflow:
     repository: https://github.com/withAutograph/arrusted-development.git
     path: WORKFLOW.md
-    revision: d44b6a22c01d3cc1c685d0e10f1f1a24322fa2c4
+    revision: 71b8ae3ab04d213401c82f4445df5966bbd747bc
   images:
     built_from_symphony_revision: bd77c48d5800e9a849eeb2bf2aa29cf06abb121e
     orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:a102715003173717f17b17cacd74cfc41275b4ded7738f1bd1713b912d1d3254
