@@ -13,14 +13,14 @@ index e0f24a0..7924bff 100644
  
  ## License
 diff --git a/elixir/README.md b/elixir/README.md
-index f17a297..37189a6 100644
+index f17a297..76c3899 100644
 --- a/elixir/README.md
 +++ b/elixir/README.md
 @@ -133,6 +133,8 @@ agent:
    max_turns: 20
  codex:
    command: codex app-server
-+  model: gpt-5.6-terra
++  model: gpt-6-sol
 +  reasoning_effort: medium
  ---
  
@@ -43,7 +43,7 @@ index f17a297..37189a6 100644
  codex:
 -  command: "$CODEX_BIN --config 'model=\"gpt-5.5\"' app-server"
 +  command: "$CODEX_BIN app-server"
-+  model: gpt-5.6-terra
++  model: gpt-6-sol
 +  reasoning_effort: medium
  ```
  
@@ -66,7 +66,7 @@ index f17a297..37189a6 100644
  ### Linear adapter profile
  
 diff --git a/elixir/WORKFLOW.md b/elixir/WORKFLOW.md
-index c87d048..5ed302a 100644
+index c87d048..ead6fcf 100644
 --- a/elixir/WORKFLOW.md
 +++ b/elixir/WORKFLOW.md
 @@ -31,7 +31,9 @@ agent:
@@ -75,7 +75,7 @@ index c87d048..5ed302a 100644
  codex:
 -  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
 +  command: codex --config shell_environment_policy.inherit=all app-server
-+  model: gpt-5.6-terra
++  model: gpt-6-sol
 +  reasoning_effort: medium
    approval_policy: never
    thread_sandbox: workspace-write
@@ -1256,7 +1256,7 @@ index 4b23aed..5767d00 100644
 +      write_workflow_file!(Workflow.workflow_file_path(),
 +        workspace_root: workspace_root,
 +        codex_command: "#{codex_binary} app-server",
-+        codex_model: "gpt-6-sol",
++        codex_model: "gpt-5.6-terra",
 +        codex_reasoning_effort: "medium"
 +      )
 +
@@ -1332,7 +1332,7 @@ index 4b23aed..5767d00 100644
      test_root =
        Path.join(
 diff --git a/elixir/test/symphony_elixir/core_test.exs b/elixir/test/symphony_elixir/core_test.exs
-index 1263601..6af96c7 100644
+index 1263601..229da64 100644
 --- a/elixir/test/symphony_elixir/core_test.exs
 +++ b/elixir/test/symphony_elixir/core_test.exs
 @@ -925,6 +925,37 @@ defmodule SymphonyElixir.CoreTest do
@@ -1405,6 +1405,24 @@ index 1263601..6af96c7 100644
    test "abnormal worker exit increments retry attempt progressively" do
      issue_id = "issue-crash"
      ref = make_ref()
+@@ -2211,7 +2267,7 @@ defmodule SymphonyElixir.CoreTest do
+ 
+       write_workflow_file!(Workflow.workflow_file_path(),
+         workspace_root: workspace_root,
+-        codex_command: "#{codex_binary} --config 'model=\"gpt-5.5\"' app-server"
++        codex_command: "#{codex_binary} --config 'model=\"gpt-6-sol\"' app-server"
+       )
+ 
+       issue = %Issue{
+@@ -2230,7 +2286,7 @@ defmodule SymphonyElixir.CoreTest do
+       lines = String.split(trace, "\n", trim: true)
+ 
+       assert argv_line = Enum.find(lines, fn line -> String.starts_with?(line, "ARGV:") end)
+-      assert String.contains?(argv_line, "--config model=\"gpt-5.5\" app-server")
++      assert String.contains?(argv_line, "--config model=\"gpt-6-sol\" app-server")
+       refute String.contains?(argv_line, "--ask-for-approval never")
+       refute String.contains?(argv_line, "--sandbox danger-full-access")
+     after
 diff --git a/elixir/test/symphony_elixir/extensions_test.exs b/elixir/test/symphony_elixir/extensions_test.exs
 index 8fb3417..859724d 100644
 --- a/elixir/test/symphony_elixir/extensions_test.exs
@@ -1420,7 +1438,7 @@ index 8fb3417..859724d 100644
  
 diff --git a/elixir/test/symphony_elixir/task_settings_test.exs b/elixir/test/symphony_elixir/task_settings_test.exs
 new file mode 100644
-index 0000000..2ad5970
+index 0000000..e6c830c
 --- /dev/null
 +++ b/elixir/test/symphony_elixir/task_settings_test.exs
 @@ -0,0 +1,75 @@
@@ -1438,13 +1456,13 @@ index 0000000..2ad5970
 +
 +    defaults = Config.settings!().codex
 +
-+    assert {:ok, %{model: "gpt-5.6-terra", reasoning_effort: "medium", overridden?: false}} =
++    assert {:ok, %{model: "gpt-6-sol", reasoning_effort: "medium", overridden?: false}} =
 +             TaskSettings.resolve(issue([]), defaults)
 +
 +    assert {:ok, %{model: "gpt-5.6-terra", reasoning_effort: "medium", overridden?: true}} =
 +             TaskSettings.resolve(issue(["model:gpt-5.6-terra"]), defaults)
 +
-+    assert {:ok, %{model: "gpt-5.6-terra", reasoning_effort: "high", overridden?: true}} =
++    assert {:ok, %{model: "gpt-6-sol", reasoning_effort: "high", overridden?: true}} =
 +             TaskSettings.resolve(issue(["reasoning:high"]), defaults)
 +
 +    assert {:ok, %{model: "gpt-5.6-sol", reasoning_effort: "xhigh", overridden?: true}} =
@@ -1500,7 +1518,7 @@ index 0000000..2ad5970
 +  end
 +end
 diff --git a/elixir/test/symphony_elixir/workspace_and_config_test.exs b/elixir/test/symphony_elixir/workspace_and_config_test.exs
-index 15f7c36..28c5f6e 100644
+index 15f7c36..4517bd7 100644
 --- a/elixir/test/symphony_elixir/workspace_and_config_test.exs
 +++ b/elixir/test/symphony_elixir/workspace_and_config_test.exs
 @@ -3,7 +3,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
@@ -1512,6 +1530,20 @@ index 15f7c36..28c5f6e 100644
  
    test "workspace bootstrap can be implemented in after_create hook" do
      test_root =
+@@ -1052,11 +1052,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
+     assert Config.settings!().tracker.required_labels == [""]
+ 
+     write_workflow_file!(Workflow.workflow_file_path(),
+-      codex_command: "codex --config 'model=\"gpt-5.5\"' app-server"
++      codex_command: "codex --config 'model=\"gpt-6-sol\"' app-server"
+     )
+ 
+     assert Config.settings!().codex.command ==
+-             "codex --config 'model=\"gpt-5.5\"' app-server"
++             "codex --config 'model=\"gpt-6-sol\"' app-server"
+ 
+     explicit_root =
+       Path.join(
 @@ -1668,4 +1668,129 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
        File.rm_rf(test_root)
      end

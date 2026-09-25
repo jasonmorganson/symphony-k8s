@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rg --version \
     && rm -rf /var/lib/apt/lists/*
 
-ARG MISE_VERSION=2026.7.5
+ARG MISE_VERSION=2026.9.12
 RUN . /tmp/runtime-common.sh && install_mise
 
 RUN mkdir -p /srv/symphony/workspaces /etc/ssh/keys /run/sshd \
