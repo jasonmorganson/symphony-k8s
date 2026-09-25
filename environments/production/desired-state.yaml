@@ -6,7 +6,7 @@ spec:
   namespace: symphony
   symphony:
     repository: https://github.com/jasonmorganson/symphony.git
-    revision: bd77c48d5800e9a849eeb2bf2aa29cf06abb121e
+    revision: 3b8ec8e5d3f91dafd188f798c4b99466d794d872
     upstream_repository: https://github.com/openai/symphony.git
     upstream_revision: f8e8b8a670c799f6e0ade7a8c25c4bf4a4a56ec7
   workflow:
@@ -14,7 +14,7 @@ spec:
     path: WORKFLOW.md
     revision: 71b8ae3ab04d213401c82f4445df5966bbd747bc
   images:
-    built_from_symphony_revision: bd77c48d5800e9a849eeb2bf2aa29cf06abb121e
+    built_from_symphony_revision: 3b8ec8e5d3f91dafd188f798c4b99466d794d872
     orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:a102715003173717f17b17cacd74cfc41275b4ded7738f1bd1713b912d1d3254
     worker: ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:1a72392f97acd2acdfe1e520a39456b3d916d918b122f0011fff646887994ae8
   workers:
