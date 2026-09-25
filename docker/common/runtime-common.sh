@@ -14,16 +14,16 @@ install_codex_cli() {
 }
 
 install_mise() {
-  mise_version="${MISE_VERSION:-2026.7.5}"
+  mise_version="${MISE_VERSION:-2026.9.12}"
 
   case "$(dpkg --print-architecture)" in
     amd64)
       mise_arch="x64"
-      mise_sha="5f7ab76afdf0780d12edeaa67e908094e9ccf7924cfe203e415c1cfb87bbf778"
+      mise_sha="e79ae57945034903aee8aa2ea66b4c7ca9cd4f4edd5a8a78a589cbae6d0f428a"
       ;;
     arm64)
       mise_arch="arm64"
-      mise_sha="41fcf744050bfa27f9871e2151ac6f44b5ce2741424b3d5282b92becc71e6bc4"
+      mise_sha="f344c6961190ed2f68e595ed7cb4f03c36c17812bd608886bec799a3082180ff"
       ;;
     *) echo "Unsupported mise architecture" >&2; return 1 ;;
   esac
