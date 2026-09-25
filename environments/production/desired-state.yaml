@@ -15,8 +15,8 @@ spec:
     revision: 71b8ae3ab04d213401c82f4445df5966bbd747bc
   images:
     built_from_symphony_revision: 3b8ec8e5d3f91dafd188f798c4b99466d794d872
-    orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:00381d2e0d02e2e37047363f84f224df33c64a5a9145adf00704883c592a65f6
-    worker: ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:c2290f51a49ad65275e0facd45d23196da7e6764d9ac4d65739c304e59e17a17
+    orchestrator: ghcr.io/jasonmorganson/symphony-k8s-orchestrator@sha256:2f8c89aacea30c9271b9d9df56de09b6b437adc70066629967274ff613a8195e
+    worker: ghcr.io/jasonmorganson/symphony-k8s-worker@sha256:6d01ce25f1c1db25d9de77eb6c0e59551e5b444aeb143ed2c51de34a3d89aca3
   workers:
     replicas: 3
     capacity_per_worker: 1
