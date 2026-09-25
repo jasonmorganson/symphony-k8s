@@ -1201,7 +1201,7 @@ index ca7c5dd..b654b9e 100644
          "  thread_sandbox: #{yaml_value(codex_thread_sandbox)}",
          "  turn_sandbox_policy: #{yaml_value(codex_turn_sandbox_policy)}",
 diff --git a/elixir/test/symphony_elixir/app_server_test.exs b/elixir/test/symphony_elixir/app_server_test.exs
-index 4b23aed..7a9a5d3 100644
+index 4b23aed..5767d00 100644
 --- a/elixir/test/symphony_elixir/app_server_test.exs
 +++ b/elixir/test/symphony_elixir/app_server_test.exs
 @@ -1,6 +1,126 @@
@@ -1409,18 +1409,17 @@ index 1263601..229da64 100644
  
        write_workflow_file!(Workflow.workflow_file_path(),
          workspace_root: workspace_root,
--        codex_command: "#{codex_binary} --config 'model=\\\"gpt-5.5\\\"' app-server"
-+        codex_command: "#{codex_binary} --config 'model=\\\"gpt-6-sol\\\"' app-server"
+-        codex_command: "#{codex_binary} --config 'model=\"gpt-5.5\"' app-server"
++        codex_command: "#{codex_binary} --config 'model=\"gpt-6-sol\"' app-server"
        )
  
        issue = %Issue{
 @@ -2230,7 +2286,7 @@ defmodule SymphonyElixir.CoreTest do
- 
-       lines = String.split(trace, "\\n", trim: true)
+       lines = String.split(trace, "\n", trim: true)
  
        assert argv_line = Enum.find(lines, fn line -> String.starts_with?(line, "ARGV:") end)
--      assert String.contains?(argv_line, "--config model=\\\"gpt-5.5\\\" app-server")
-+      assert String.contains?(argv_line, "--config model=\\\"gpt-6-sol\\\" app-server")
+-      assert String.contains?(argv_line, "--config model=\"gpt-5.5\" app-server")
++      assert String.contains?(argv_line, "--config model=\"gpt-6-sol\" app-server")
        refute String.contains?(argv_line, "--ask-for-approval never")
        refute String.contains?(argv_line, "--sandbox danger-full-access")
      after
@@ -1535,13 +1534,13 @@ index 15f7c36..4517bd7 100644
      assert Config.settings!().tracker.required_labels == [""]
  
      write_workflow_file!(Workflow.workflow_file_path(),
--      codex_command: "codex --config 'model=\\\"gpt-5.5\\\"' app-server"
-+      codex_command: "codex --config 'model=\\\"gpt-6-sol\\\"' app-server"
+-      codex_command: "codex --config 'model=\"gpt-5.5\"' app-server"
++      codex_command: "codex --config 'model=\"gpt-6-sol\"' app-server"
      )
  
      assert Config.settings!().codex.command ==
--             "codex --config 'model=\\\"gpt-5.5\\\"' app-server"
-+             "codex --config 'model=\\\"gpt-6-sol\\\"' app-server"
+-             "codex --config 'model=\"gpt-5.5\"' app-server"
++             "codex --config 'model=\"gpt-6-sol\"' app-server"
  
      explicit_root =
        Path.join(
