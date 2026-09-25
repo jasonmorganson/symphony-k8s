@@ -26,6 +26,13 @@ if verify_codex_chatgpt_auth >/dev/null 2>&1; then
 fi
 unset -f runuser
 
+runuser() {
+  [[ "$*" == *"--model gpt-6-sol"* ]] || return 2
+  printf '%s\n' "OK"
+}
+verify_codex_chatgpt_session
+unset -f runuser
+
 manifest="$ROOT_DIR/k8s/base/worker-statefulset.yaml"
 grep -q 'secretName: codex-chatgpt-auth' "$manifest"
 grep -q 'name: github-machine-arrusted-symphony' "$manifest"
