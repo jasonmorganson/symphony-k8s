@@ -26,6 +26,7 @@ jobs:
       group: production-doks-diagnostics
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
@@ -102,7 +103,7 @@ jobs:
               -e 's/(Bearer[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' ||
             true
       - name: Probe worker Codex sessions
-        if: inputs.probe_codex
+        if: ${{ always() && inputs.probe_codex }}
         run: |
           set -euo pipefail
           status=0
@@ -118,6 +119,7 @@ jobs:
                 runuser -u symphony -- \
                 env HOME=/home/symphony \
                 codex exec \
+                  --model gpt-6-sol \
                   --skip-git-repo-check \
                   --sandbox read-only \
                   --color never \

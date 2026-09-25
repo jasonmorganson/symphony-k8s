@@ -143,6 +143,7 @@ verify_codex_chatgpt_session() {
     env HOME="$SYMPHONY_HOME" \
     timeout 60s \
     codex exec \
+      --model gpt-6-sol \
       --skip-git-repo-check \
       --sandbox read-only \
       --color never \

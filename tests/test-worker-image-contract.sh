@@ -14,6 +14,7 @@ grep -q 'jq --version' "$DOCKERFILE"
 grep -q 'rg --version' "$DOCKERFILE"
 grep -q 'unzip -v' "$DOCKERFILE"
 grep -q 'zip --version' "$DOCKERFILE"
+grep -Fq 'npm install -g @openai/codex@0.157.0' "$ROOT_DIR/docker/common/runtime-common.sh"
 
 if [[ $# -eq 0 ]]; then
   exit 0
