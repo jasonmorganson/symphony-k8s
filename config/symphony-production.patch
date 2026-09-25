@@ -1256,7 +1256,7 @@ index 4b23aed..5767d00 100644
 +      write_workflow_file!(Workflow.workflow_file_path(),
 +        workspace_root: workspace_root,
 +        codex_command: "#{codex_binary} app-server",
-+        codex_model: "gpt-5.6-terra",
++        codex_model: "gpt-6-sol",
 +        codex_reasoning_effort: "medium"
 +      )
 +
@@ -1432,7 +1432,7 @@ index 0000000..2ad5970
 +
 +  test "task labels inherit defaults and override model or reasoning independently" do
 +    write_workflow_file!(Workflow.workflow_file_path(),
-+      codex_model: "gpt-5.6-terra",
++      codex_model: "gpt-6-sol",
 +      codex_reasoning_effort: "medium"
 +    )
 +
