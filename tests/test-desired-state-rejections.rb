@@ -41,7 +41,7 @@ missing_secrets["spec"]["secrets"]["references"] = []
 abort "missing secret references were accepted" unless rejected?(root, missing_secrets, fixture)
 
 insufficient_pool = Marshal.load(Marshal.dump(canonical))
-insufficient_pool["spec"]["workers"]["node_pool"]["max_nodes"] = 2
+insufficient_pool["spec"]["workers"]["node_pool"]["max_nodes"] = canonical["spec"]["workers"]["replicas"] - 1
 abort "insufficient worker-pool maximum was accepted" unless rejected?(root, insufficient_pool, fixture)
 
 puts "unsafe desired-state inputs are rejected"
