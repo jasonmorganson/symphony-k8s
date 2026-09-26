@@ -45,7 +45,7 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Fetch short-lived cluster credentials
-        run: doctl kubernetes cluster kubeconfig save --expiry-seconds 1800 symphony-k8s >/dev/null
+        run: doctl kubernetes cluster kubeconfig save --expiry-seconds 7200 symphony-k8s >/dev/null
       - name: Install Kustomize
         run: |
           bash scripts/install-kustomize.sh "$RUNNER_TEMP/bin"
