@@ -44,6 +44,7 @@ spec:
     node_selector:
       doks.digitalocean.com/node-pool: symphony-control
     node_pool:
+      name: symphony-control
       min_nodes: 1
       max_nodes: 1
   server:
@@ -61,5 +62,6 @@ spec:
   networking:
     cloudflare_tunnel_secret: cloudflare-tunnel-token
     node_pool:
+      name: symphony-system
       min_nodes: 1
       max_nodes: 1
