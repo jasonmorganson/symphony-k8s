@@ -91,6 +91,10 @@ pool_settings() {
     maximum=Integer(pool.fetch("max_nodes"))
     abort "#{ARGV.fetch(1)}.node_pool min_nodes must be at least one for production" if minimum < 1
     abort "#{ARGV.fetch(1)}.node_pool max_nodes must be at least min_nodes" if maximum < minimum
+    if ARGV.fetch(1) == "workers"
+      replicas=Integer(spec.dig("workers", "replicas"))
+      abort "workers replicas exceed the committed node-pool maximum" if replicas > maximum
+    end
     puts [name, minimum, maximum].join(" ")
   ' "$desired" "$key"
 }
@@ -315,8 +319,9 @@ fi
 apply_committed "$temporary/production.yaml"
 kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
 wait_for_worker_convergence
-# Shrink provider capacity only after the committed worker target is Ready.
+# Keep provider capacity aligned with the committed worker target after it is Ready.
 reconcile_worker_pool
+wait_for_deployment_rollout cloudflared 20m
 wait_for_deployment_rollout symphony-orchestrator 40m
 
 ready="$(kubectl -n "$namespace" get statefulset symphony-worker -o jsonpath='{.status.readyReplicas}')"
