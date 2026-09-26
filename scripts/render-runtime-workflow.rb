@@ -35,12 +35,11 @@ node_pool = workers.fetch("node_pool")
 assert_keys!(node_pool, %w[min_nodes max_nodes], "spec.workers.node_pool")
 minimum_nodes = Integer(node_pool.fetch("min_nodes"))
 maximum_nodes = Integer(node_pool.fetch("max_nodes"))
-abort "workers.node_pool min_nodes must be at least one for production" if minimum_nodes < 1
 abort "workers.replicas must be between 1 and 100" unless (1..100).cover?(replicas)
 abort "capacity_per_worker must be positive" unless capacity.positive?
-abort "workers.node_pool min_nodes must be non-negative" if minimum_nodes.negative?
 abort "workers.node_pool max_nodes must be at least min_nodes" if maximum_nodes < minimum_nodes
 abort "workers replicas exceed the committed node-pool maximum" if replicas > maximum_nodes
+abort "workers.node_pool min_nodes must be at least one for production" if minimum_nodes < 1
 
 %w[orchestrator networking].each do |section_name|
   pool = spec.fetch(section_name).fetch("node_pool")
