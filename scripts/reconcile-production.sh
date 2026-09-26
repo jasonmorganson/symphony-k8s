@@ -84,7 +84,8 @@ pool_settings() {
     desired=YAML.safe_load(File.read(ARGV.fetch(0)))
     spec=desired.fetch("spec")
     section=spec.fetch(ARGV.fetch(1))
-    pool=section.fetch("node_pool")
+    pool=section["node_pool"]
+    abort "#{ARGV.fetch(1)}.node_pool must declare autoscaling bounds" unless pool.is_a?(Hash)
     name=pool["name"] || section.dig("node_selector", "doks.digitalocean.com/node-pool")
     abort "#{ARGV.fetch(1)}.node_pool must name its DigitalOcean pool" unless name.is_a?(String) && !name.empty?
     minimum=Integer(pool.fetch("min_nodes"))
