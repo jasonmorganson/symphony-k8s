@@ -107,6 +107,19 @@ apply_workflow() {
   workflow_applied=true
 }
 
+wait_for_deployment_rollout() {
+  local deployment="$1"
+  local timeout="$2"
+  if kubectl -n "$namespace" rollout status "deployment/$deployment" --timeout="$timeout"; then
+    return 0
+  fi
+  echo "deployment $deployment did not become ready; collecting safe diagnostics" >&2
+  kubectl -n "$namespace" get deployment "$deployment" -o wide || true
+  kubectl -n "$namespace" get pods -o wide || true
+  kubectl -n "$namespace" get events --sort-by=.lastTimestamp | tail -n 80 || true
+  return 1
+}
+
 wait_for_worker_convergence() {
   local state
   for _ in {1..180}; do
@@ -234,7 +247,7 @@ elif (( target < current )); then
   ' "$temporary/reduced-hosts.yaml" "$current"
   apply_workflow
   apply_committed "$temporary/reduced-hosts.yaml"
-  kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=40m
+  wait_for_deployment_rollout symphony-orchestrator 40m
 
   kubectl -n "$namespace" port-forward service/symphony-orchestrator 14000:4000 >"$temporary/port-forward.log" 2>&1 &
   port_forward_pid=$!
@@ -252,7 +265,7 @@ kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
 wait_for_worker_convergence
 # Shrink provider capacity only after the committed worker target is Ready.
 reconcile_worker_pool
-kubectl -n "$namespace" rollout status deployment/symphony-orchestrator --timeout=40m
+wait_for_deployment_rollout symphony-orchestrator 40m
 
 ready="$(kubectl -n "$namespace" get statefulset symphony-worker -o jsonpath='{.status.readyReplicas}')"
 [[ "${ready:-0}" == "$target" ]] || { echo "worker readiness does not match committed replicas" >&2; exit 1; }
