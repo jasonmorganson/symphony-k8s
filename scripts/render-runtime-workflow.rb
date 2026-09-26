@@ -23,10 +23,10 @@ assert_keys!(spec.fetch("symphony"), %w[repository revision upstream_repository 
 assert_keys!(spec.fetch("workflow"), %w[repository path revision], "spec.workflow")
 assert_keys!(spec.fetch("images"), %w[built_from_symphony_revision orchestrator worker], "spec.images")
 assert_keys!(spec.fetch("workers"), %w[replicas capacity_per_worker workspace_root resources node_selector node_pool], "spec.workers")
-assert_keys!(spec.fetch("orchestrator"), %w[resources node_selector], "spec.orchestrator")
+assert_keys!(spec.fetch("orchestrator"), %w[resources node_selector node_pool], "spec.orchestrator")
 assert_keys!(spec.fetch("server"), %w[host port], "spec.server")
 assert_keys!(spec.fetch("secrets"), %w[references], "spec.secrets")
-assert_keys!(spec.fetch("networking"), %w[cloudflare_tunnel_secret], "spec.networking")
+assert_keys!(spec.fetch("networking"), %w[cloudflare_tunnel_secret node_pool], "spec.networking")
 
 workers = spec.fetch("workers")
 replicas = Integer(workers.fetch("replicas"))
@@ -37,9 +37,22 @@ minimum_nodes = Integer(node_pool.fetch("min_nodes"))
 maximum_nodes = Integer(node_pool.fetch("max_nodes"))
 abort "workers.replicas must be between 1 and 100" unless (1..100).cover?(replicas)
 abort "capacity_per_worker must be positive" unless capacity.positive?
-abort "workers.node_pool min_nodes must be non-negative" if minimum_nodes.negative?
 abort "workers.node_pool max_nodes must be at least min_nodes" if maximum_nodes < minimum_nodes
 abort "workers replicas exceed the committed node-pool maximum" if replicas > maximum_nodes
+abort "workers.node_pool min_nodes must be at least one for production" if minimum_nodes < 1
+
+%w[orchestrator networking].each do |section_name|
+  pool = spec.fetch(section_name).fetch("node_pool")
+  assert_keys!(pool, %w[name min_nodes max_nodes], "spec.#{section_name}.node_pool")
+  name = pool.fetch("name")
+  minimum = Integer(pool.fetch("min_nodes"))
+  maximum = Integer(pool.fetch("max_nodes"))
+  abort "spec.#{section_name}.node_pool name must be non-empty" unless name.is_a?(String) && !name.empty?
+  abort "spec.#{section_name}.node_pool min_nodes must be at least one for production" if minimum < 1
+  abort "spec.#{section_name}.node_pool max_nodes must be at least min_nodes" if maximum < minimum
+  selector = spec.dig(section_name, "node_selector", "doks.digitalocean.com/node-pool")
+  abort "spec.#{section_name}.node_pool name must match its node selector" if selector && selector != name
+end
 
 revision_pattern = /\A[0-9a-f]{40}\z/
 symphony_revision = spec.dig("symphony", "revision")

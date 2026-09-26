@@ -31,23 +31,11 @@ image_revision="$(value spec.images.built_from_symphony_revision)"
   exit 1
 }
 
-reconcile_worker_pool() {
-  local worker_pool minimum maximum cluster pool_state
-  read -r worker_pool minimum maximum < <(ruby -ryaml -e '
-    desired=YAML.safe_load(File.read(ARGV.fetch(0)))
-    selector=desired.dig("spec", "workers", "node_selector")
-    abort "workers.node_selector must select a DigitalOcean node pool" unless selector.is_a?(Hash)
-    pool=selector["doks.digitalocean.com/node-pool"]
-    abort "workers.node_selector must set doks.digitalocean.com/node-pool" unless pool.is_a?(String) && !pool.empty?
-    bounds=desired.dig("spec", "workers", "node_pool")
-    abort "workers.node_pool must declare autoscaling bounds" unless bounds.is_a?(Hash)
-    minimum=Integer(bounds.fetch("min_nodes"))
-    maximum=Integer(bounds.fetch("max_nodes"))
-    abort "workers.node_pool min_nodes must be non-negative" if minimum.negative?
-    abort "workers.node_pool max_nodes must be at least min_nodes" if maximum < minimum
-    abort "workers replicas exceed the committed node-pool maximum" if Integer(desired.dig("spec", "workers", "replicas")) > maximum
-    puts [pool, minimum, maximum].join(" ")
-  ' "$desired")
+reconcile_node_pool() {
+  local pool minimum maximum cluster pool_state
+  pool="$1"
+  minimum="$2"
+  maximum="$3"
   cluster="${SYMPHONY_CLUSTER_NAME:-symphony-k8s}"
 
   pool_state="$(doctl kubernetes cluster get "$cluster" -o json | ruby -rjson -e '
@@ -57,16 +45,18 @@ reconcile_worker_pool() {
     minimum=Integer(minimum)
     maximum=Integer(maximum)
     pool=(cluster.fetch("node_pools") || []).find { |candidate| candidate["name"] == pool_name }
-    abort "worker capacity preflight: node pool #{pool_name.inspect} was not found in cluster #{cluster.fetch("name", "unknown").inspect}" unless pool
+    abort "node-pool preflight: pool #{pool_name.inspect} was not found in cluster #{cluster.fetch("name", "unknown").inspect}" unless pool
+    abort "node-pool preflight: invalid minimum for #{pool_name.inspect}" if minimum.negative?
+    abort "node-pool preflight: maximum is below minimum for #{pool_name.inspect}" if maximum < minimum
 
     autoscaling=pool.fetch("auto_scale", false)
     current_minimum=pool["min_nodes"] || 0
-    current_maximum=pool["max_nodes"]
+    current_maximum=pool["max_nodes"] || 0
     puts autoscaling && current_minimum == minimum && current_maximum == maximum ? "converged" : "drifted"
-  ' "$worker_pool" "$minimum" "$maximum")"
+  ' "$pool" "$minimum" "$maximum")"
 
   if [[ "$pool_state" == drifted ]]; then
-    doctl kubernetes cluster node-pool update "$cluster" "$worker_pool" \
+    doctl kubernetes cluster node-pool update "$cluster" "$pool" \
       --auto-scale --min-nodes "$minimum" --max-nodes "$maximum" >/dev/null
   fi
 
@@ -76,16 +66,81 @@ reconcile_worker_pool() {
       cluster=clusters.is_a?(Array) ? clusters.fetch(0) : clusters
       pool_name, minimum, maximum=ARGV
       pool=(cluster.fetch("node_pools") || []).find { |candidate| candidate["name"] == pool_name }
-      abort "worker pool #{pool_name.inspect} disappeared during reconciliation" unless pool
-      exit(pool["auto_scale"] && (pool["min_nodes"] || 0) == Integer(minimum) && pool["max_nodes"] == Integer(maximum) ? 0 : 1)
-    ' "$worker_pool" "$minimum" "$maximum"; then
+      abort "node pool #{pool_name.inspect} disappeared during reconciliation" unless pool
+      exit(pool["auto_scale"] && (pool["min_nodes"] || 0) == Integer(minimum) && (pool["max_nodes"] || 0) == Integer(maximum) ? 0 : 1)
+    ' "$pool" "$minimum" "$maximum"; then
       return 0
     fi
     sleep 10
   done
 
-  echo "worker node pool did not converge to committed autoscaling bounds" >&2
+  echo "node pool $pool did not converge to committed autoscaling bounds" >&2
   return 1
+}
+
+pool_settings() {
+  local key="$1"
+  ruby -ryaml -e '
+    desired=YAML.safe_load(File.read(ARGV.fetch(0)))
+    spec=desired.fetch("spec")
+    section=spec.fetch(ARGV.fetch(1))
+    pool=section["node_pool"]
+    abort "#{ARGV.fetch(1)}.node_pool must declare autoscaling bounds" unless pool.is_a?(Hash)
+    name=pool["name"] || section.dig("node_selector", "doks.digitalocean.com/node-pool")
+    abort "#{ARGV.fetch(1)}.node_pool must name its DigitalOcean pool" unless name.is_a?(String) && !name.empty?
+    minimum=Integer(pool.fetch("min_nodes"))
+    maximum=Integer(pool.fetch("max_nodes"))
+    abort "#{ARGV.fetch(1)}.node_pool min_nodes must be at least one for production" if minimum < 1
+    abort "#{ARGV.fetch(1)}.node_pool max_nodes must be at least min_nodes" if maximum < minimum
+    if ARGV.fetch(1) == "workers"
+      replicas=Integer(spec.dig("workers", "replicas"))
+      abort "workers replicas exceed the committed node-pool maximum" if replicas > maximum
+    end
+    puts [name, minimum, maximum].join(" ")
+  ' "$desired" "$key"
+}
+
+reconcile_required_node_pools() {
+  local worker_pool worker_minimum worker_maximum
+  local control_pool control_minimum control_maximum
+  local system_pool system_minimum system_maximum
+
+  read -r worker_pool worker_minimum worker_maximum < <(pool_settings workers)
+  read -r control_pool control_minimum control_maximum < <(pool_settings orchestrator)
+  read -r system_pool system_minimum system_maximum < <(pool_settings networking)
+
+  # Restore the dedicated pools before applying workloads; otherwise every pod
+  # remains Pending when a previous scale-down removed all cluster nodes.
+  reconcile_node_pool "$control_pool" "$control_minimum" "$control_maximum"
+  reconcile_node_pool "$system_pool" "$system_minimum" "$system_maximum"
+  reconcile_node_pool "$worker_pool" "$worker_minimum" "$worker_maximum"
+
+  for _ in {1..60}; do
+    if kubectl get nodes -l "doks.digitalocean.com/node-pool=$control_pool" -o json |
+      ruby -rjson -e 'nodes=JSON.parse(STDIN.read).fetch("items"); exit(nodes.any? { |node| node.dig("status","conditions")&.any? { |condition| condition["type"]=="Ready" && condition["status"]=="True" } } ? 0 : 1)' &&
+      kubectl get nodes -l "doks.digitalocean.com/node-pool=$system_pool" -o json |
+      ruby -rjson -e 'nodes=JSON.parse(STDIN.read).fetch("items"); exit(nodes.any? { |node| node.dig("status","conditions")&.any? { |condition| condition["type"]=="Ready" && condition["status"]=="True" } } ? 0 : 1)' &&
+      kubectl get nodes -l "doks.digitalocean.com/node-pool=$worker_pool" -o json |
+      ruby -rjson -e 'nodes=JSON.parse(STDIN.read).fetch("items"); ready=nodes.count { |node| node.dig("status","conditions")&.any? { |condition| condition["type"]=="Ready" && condition["status"]=="True" } }; exit(ready >= Integer(ARGV.fetch(0)) ? 0 : 1)' "$worker_minimum"; then
+      return 0
+    fi
+    sleep 10
+  done
+
+  echo "required Symphony node pools did not produce Ready nodes" >&2
+  doctl kubernetes cluster get "${SYMPHONY_CLUSTER_NAME:-symphony-k8s}" -o json | ruby -rjson -e '
+    cluster=JSON.parse(STDIN.read)
+    cluster=cluster.is_a?(Array) ? cluster.fetch(0) : cluster
+    puts JSON.pretty_generate((cluster["node_pools"] || []).map { |pool| pool.slice("name", "count", "auto_scale", "min_nodes", "max_nodes", "nodes") })
+  ' >&2 || true
+  kubectl get nodes -o wide >&2 || true
+  return 1
+}
+
+reconcile_worker_pool() {
+  local worker_pool minimum maximum
+  read -r worker_pool minimum maximum < <(pool_settings workers)
+  reconcile_node_pool "$worker_pool" "$minimum" "$maximum"
 }
 
 bash "$repo_root/scripts/render-production.sh" "$desired" "$workflow_checkout" "$temporary/production.yaml"
@@ -106,6 +161,8 @@ apply_workflow() {
   apply_committed "$temporary/workflow.yaml"
   workflow_applied=true
 }
+
+reconcile_required_node_pools
 
 wait_for_deployment_rollout() {
   local deployment="$1"
@@ -263,8 +320,9 @@ fi
 apply_committed "$temporary/production.yaml"
 kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
 wait_for_worker_convergence
-# Shrink provider capacity only after the committed worker target is Ready.
+# Keep provider capacity aligned with the committed worker target after it is Ready.
 reconcile_worker_pool
+wait_for_deployment_rollout cloudflared 20m
 wait_for_deployment_rollout symphony-orchestrator 40m
 
 ready="$(kubectl -n "$namespace" get statefulset symphony-worker -o jsonpath='{.status.readyReplicas}')"

@@ -31,7 +31,7 @@ spec:
     node_selector:
       doks.digitalocean.com/node-pool: symphony-ha
     node_pool:
-      min_nodes: 0
+      min_nodes: 3
       max_nodes: 3
   orchestrator:
     resources:
@@ -43,6 +43,10 @@ spec:
         memory: 6Gi
     node_selector:
       doks.digitalocean.com/node-pool: symphony-control
+    node_pool:
+      name: symphony-control
+      min_nodes: 1
+      max_nodes: 1
   server:
     host: 0.0.0.0
     port: 4001
@@ -57,3 +61,7 @@ spec:
       - cloudflare-tunnel-token
   networking:
     cloudflare_tunnel_secret: cloudflare-tunnel-token
+    node_pool:
+      name: symphony-system
+      min_nodes: 1
+      max_nodes: 1

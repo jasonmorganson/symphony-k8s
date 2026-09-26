@@ -72,7 +72,7 @@ grep -q -- 'delete statefulset symphony-worker --cascade=orphan --wait=true' \
   "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'init-workspace-permissions' "$ROOT_DIR/scripts/reconcile-production.sh"
 grep -q -- 'node-pool update' "$ROOT_DIR/scripts/reconcile-production.sh"
-grep -q -- 'workers.node_pool must declare autoscaling bounds' "$ROOT_DIR/scripts/reconcile-production.sh"
+grep -q -- 'node_pool must declare autoscaling bounds' "$ROOT_DIR/scripts/reconcile-production.sh"
 [[ "$(grep -c 'pool\["min_nodes"\] || 0' "$ROOT_DIR/scripts/reconcile-production.sh")" == 2 ]] || {
   echo "DigitalOcean null zero-minimum handling regressed" >&2
   exit 1

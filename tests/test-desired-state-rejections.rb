@@ -44,4 +44,12 @@ insufficient_pool = Marshal.load(Marshal.dump(canonical))
 insufficient_pool["spec"]["workers"]["node_pool"]["max_nodes"] = canonical["spec"]["workers"]["replicas"] - 1
 abort "insufficient worker-pool maximum was accepted" unless rejected?(root, insufficient_pool, fixture)
 
+missing_system_capacity = Marshal.load(Marshal.dump(canonical))
+missing_system_capacity["spec"]["networking"]["node_pool"]["max_nodes"] = 0
+abort "missing Tunnel node-pool capacity was accepted" unless rejected?(root, missing_system_capacity, fixture)
+
+mismatched_control_pool = Marshal.load(Marshal.dump(canonical))
+mismatched_control_pool["spec"]["orchestrator"]["node_pool"]["name"] = "another-pool"
+abort "mismatched control node-pool selector was accepted" unless rejected?(root, mismatched_control_pool, fixture)
+
 puts "unsafe desired-state inputs are rejected"
