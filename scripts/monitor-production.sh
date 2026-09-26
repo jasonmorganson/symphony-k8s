@@ -51,6 +51,27 @@ require_worker_convergence() {
     '
 }
 
+require_cloudflared_convergence() {
+  kubectl -n "$namespace" get deployment/cloudflared -o json |
+    ruby -rjson -e '
+      workload = JSON.parse(STDIN.read)
+      spec = workload.fetch("spec")
+      status = workload.fetch("status", {})
+      replicas = spec.fetch("replicas", 1)
+      ready = status.fetch("readyReplicas", 0)
+      available = status.fetch("availableReplicas", 0)
+      observed = status.fetch("observedGeneration", 0)
+      generation = workload.fetch("metadata").fetch("generation")
+      abort "cloudflared deployment has not observed its current generation" unless observed >= generation
+      abort "cloudflared deployment is not ready" unless ready == replicas && available == replicas
+    '
+}
+
+require_public_dashboard() {
+  curl --location --fail --silent --show-error --max-time 30 \
+    https://symphony.morganson.me/ >/dev/null
+}
+
 require_orchestrator_endpoint() {
   kubectl -n "$namespace" get endpoints/symphony-orchestrator -o json |
     ruby -rjson -e '
@@ -76,9 +97,11 @@ require_state_api() {
   return 1
 }
 
+require_cloudflared_convergence
 require_deployment_convergence
 require_worker_convergence
 require_orchestrator_endpoint
 require_state_api
+require_public_dashboard
 
-echo "production monitor verified workload convergence, service endpoints, and state API"
+echo "production monitor verified worker, orchestrator, and tunnel readiness plus state API and public dashboard"
