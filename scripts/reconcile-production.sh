@@ -362,7 +362,7 @@ if (( target == 0 )); then
   # the replacement agent is Pending because all pools have reached zero.
   # Application workloads are already stopped and this cluster is suspended,
   # so remove the managed agents to let the provider finish node deletion.
-  kubectl -n kube-system delete pod -l k8s-app=konnectivity-agent \\
+  kubectl -n kube-system delete pod -l k8s-app=konnectivity-agent \
     --ignore-not-found --wait=true
   reconcile_node_pool "$control_pool" "$control_minimum" "$control_maximum"
   reconcile_node_pool "$system_pool" "$system_minimum" "$system_maximum"
