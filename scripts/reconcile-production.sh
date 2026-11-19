@@ -90,7 +90,7 @@ pool_settings() {
     abort "#{ARGV.fetch(1)}.node_pool must name its DigitalOcean pool" unless name.is_a?(String) && !name.empty?
     minimum=Integer(pool.fetch("min_nodes"))
     maximum=Integer(pool.fetch("max_nodes"))
-    abort "#{ARGV.fetch(1)}.node_pool min_nodes must be at least one for production" if minimum < 1
+    abort "#{ARGV.fetch(1)}.node_pool min_nodes must be non-negative" if minimum < 0
     abort "#{ARGV.fetch(1)}.node_pool max_nodes must be at least min_nodes" if maximum < minimum
     if ARGV.fetch(1) == "workers"
       replicas=Integer(spec.dig("workers", "replicas"))
@@ -162,7 +162,9 @@ apply_workflow() {
   workflow_applied=true
 }
 
-reconcile_required_node_pools
+if (( target > 0 )); then
+  reconcile_required_node_pools
+fi
 
 wait_for_deployment_rollout() {
   local deployment="$1"
@@ -300,6 +302,10 @@ elif (( target < current )); then
     docs=YAML.load_stream(File.read(path)).compact
     sts=docs.find { |d| d["kind"]=="StatefulSet" && d.dig("metadata","name")=="symphony-worker" }
     sts["spec"]["replicas"]=Integer(replicas)
+    if Integer(replicas).zero?
+      orchestrator=docs.find { |d| d["kind"]=="Deployment" && d.dig("metadata","name")=="symphony-orchestrator" }
+      orchestrator["spec"]["replicas"]=1
+    end
     File.write(path, docs.map { |d| YAML.dump(d) }.join("---\n"))
   ' "$temporary/reduced-hosts.yaml" "$current"
   apply_workflow
@@ -318,6 +324,21 @@ fi
 
 [[ "$workflow_applied" == true ]] || apply_workflow
 apply_committed "$temporary/production.yaml"
+
+# A zero target is a suspended environment: after the existing safe worker
+# drain, remove the remaining workloads and set every managed pool bound to 0.
+# Do not wait for pods or nodes that the committed state explicitly removes.
+if (( target == 0 )); then
+  read -r worker_pool worker_minimum worker_maximum < <(pool_settings workers)
+  read -r control_pool control_minimum control_maximum < <(pool_settings orchestrator)
+  read -r system_pool system_minimum system_maximum < <(pool_settings networking)
+  reconcile_node_pool "$control_pool" "$control_minimum" "$control_maximum"
+  reconcile_node_pool "$system_pool" "$system_minimum" "$system_maximum"
+  reconcile_node_pool "$worker_pool" "$worker_minimum" "$worker_maximum"
+  echo "production is suspended: all workloads and node pools are configured for zero capacity"
+  exit 0
+fi
+
 kubectl -n "$namespace" rollout status statefulset/symphony-worker --timeout=30m
 wait_for_worker_convergence
 # Keep provider capacity aligned with the committed worker target after it is Ready.
