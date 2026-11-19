@@ -298,18 +298,18 @@ elif (( target < current )); then
   ruby "$repo_root/scripts/extract-resource.rb" "$temporary/production.yaml" StatefulSet symphony-worker "$temporary/workers-current.yaml" "$current"
   cp "$temporary/production.yaml" "$temporary/reduced-hosts.yaml"
   ruby -ryaml -e '
-    path, replicas = ARGV
+    path, replicas, target = ARGV
     docs=YAML.load_stream(File.read(path)).compact
     sts=docs.find { |d| d["kind"]=="StatefulSet" && d.dig("metadata","name")=="symphony-worker" }
     sts["spec"]["replicas"]=Integer(replicas)
-    if Integer(replicas).zero?
+    if Integer(target).zero?
       orchestrator=docs.find { |d| d["kind"]=="Deployment" && d.dig("metadata","name")=="symphony-orchestrator" }
       orchestrator["spec"]["replicas"]=1
       tunnel=docs.find { |d| d["kind"]=="Deployment" && d.dig("metadata","name")=="cloudflared" }
       tunnel["spec"]["replicas"]=1
     end
     File.write(path, docs.map { |d| YAML.dump(d) }.join("---\n"))
-  ' "$temporary/reduced-hosts.yaml" "$current"
+  ' "$temporary/reduced-hosts.yaml" "$current" "$target"
   apply_workflow
   apply_committed "$temporary/reduced-hosts.yaml"
   wait_for_deployment_rollout symphony-orchestrator 40m
