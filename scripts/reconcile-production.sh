@@ -32,7 +32,7 @@ image_revision="$(value spec.images.built_from_symphony_revision)"
 }
 
 reconcile_node_pool() {
-  local pool minimum maximum cluster pool_state
+  local pool minimum maximum cluster pool_state attempts
   pool="$1"
   minimum="$2"
   maximum="$3"
@@ -52,29 +52,42 @@ reconcile_node_pool() {
     autoscaling=pool.fetch("auto_scale", false)
     current_minimum=pool["min_nodes"] || 0
     current_maximum=pool["max_nodes"] || 0
-    puts autoscaling && current_minimum == minimum && current_maximum == maximum ? "converged" : "drifted"
+    zero_capacity_pending = minimum.zero? && maximum.zero? &&
+      (Integer(pool.fetch("count", 0)).positive? || !(pool["nodes"] || []).empty?)
+    puts autoscaling && current_minimum == minimum && current_maximum == maximum && !zero_capacity_pending ? "converged" : "drifted"
   ' "$pool" "$minimum" "$maximum")"
 
   if [[ "$pool_state" == drifted ]]; then
-    doctl kubernetes cluster node-pool update "$cluster" "$pool" \
-      --auto-scale --min-nodes "$minimum" --max-nodes "$maximum" >/dev/null
+    local update_args=(--auto-scale --min-nodes "$minimum" --max-nodes "$maximum")
+    if (( minimum == 0 && maximum == 0 )); then
+      # Set the count in the same request: DigitalOcean rejects zero bounds
+      # while the pool's existing count is greater than zero.
+      update_args+=(--count 0)
+    fi
+    doctl kubernetes cluster node-pool update "$cluster" "$pool" "${update_args[@]}" >/dev/null
   fi
 
-  for _ in {1..30}; do
+  attempts=30
+  if (( minimum == 0 && maximum == 0 )); then
+    attempts=120
+  fi
+  for ((attempt = 0; attempt < attempts; attempt++)); do
     if doctl kubernetes cluster get "$cluster" -o json | ruby -rjson -e '
       clusters=JSON.parse(STDIN.read)
       cluster=clusters.is_a?(Array) ? clusters.fetch(0) : clusters
       pool_name, minimum, maximum=ARGV
       pool=(cluster.fetch("node_pools") || []).find { |candidate| candidate["name"] == pool_name }
       abort "node pool #{pool_name.inspect} disappeared during reconciliation" unless pool
-      exit(pool["auto_scale"] && (pool["min_nodes"] || 0) == Integer(minimum) && (pool["max_nodes"] || 0) == Integer(maximum) ? 0 : 1)
+      zero_nodes = Integer(minimum).positive? || Integer(maximum).positive? ||
+        (Integer(pool.fetch("count", 0)).zero? && (pool["nodes"] || []).empty?)
+      exit(pool["auto_scale"] && (pool["min_nodes"] || 0) == Integer(minimum) && (pool["max_nodes"] || 0) == Integer(maximum) && zero_nodes ? 0 : 1)
     ' "$pool" "$minimum" "$maximum"; then
       return 0
     fi
     sleep 10
   done
 
-  echo "node pool $pool did not converge to committed autoscaling bounds" >&2
+  echo "node pool $pool did not converge to committed autoscaling bounds and node count" >&2
   return 1
 }
 
