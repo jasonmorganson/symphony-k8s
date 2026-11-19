@@ -358,6 +358,12 @@ if (( target == 0 )); then
   read -r worker_pool worker_minimum worker_maximum < <(pool_settings workers)
   read -r control_pool control_minimum control_maximum < <(pool_settings orchestrator)
   read -r system_pool system_minimum system_maximum < <(pool_settings networking)
+  # The DOKS konnectivity-agent PDB can block deletion of the final node when
+  # the replacement agent is Pending because all pools have reached zero.
+  # Application workloads are already stopped and this cluster is suspended,
+  # so remove the managed agents to let the provider finish node deletion.
+  kubectl -n kube-system delete pod -l k8s-app=konnectivity-agent \
+    --ignore-not-found --wait=true
   reconcile_node_pool "$control_pool" "$control_minimum" "$control_maximum"
   reconcile_node_pool "$system_pool" "$system_minimum" "$system_maximum"
   reconcile_node_pool "$worker_pool" "$worker_minimum" "$worker_maximum"
