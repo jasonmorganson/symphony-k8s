@@ -16,12 +16,13 @@ ruby -ryaml -e '
   cloudflared=docs.find { |d| d["kind"] == "Deployment" && d.dig("metadata","name") == "cloudflared" }
   desired=YAML.safe_load(File.read(ARGV[1]))
   replicas=desired.dig("spec","workers","replicas")
+  capacity=desired.dig("spec","workers","capacity_per_worker")
   namespace=desired.dig("spec","namespace")
   abort "replica drift" unless sts.dig("spec","replicas") == replicas
   abort "namespace drift" unless docs.all? { |d| d["kind"] == "Namespace" ? d.dig("metadata","name") == namespace : !d.dig("metadata","namespace") || d.dig("metadata","namespace") == namespace }
   front=YAML.safe_load(cm.dig("data","WORKFLOW.md").split("---\n",3)[1])
   abort "host drift" unless front.dig("worker","ssh_hosts").length == replicas
-  abort "capacity drift" unless front.dig("agent","max_concurrent_agents") == replicas
+  abort "capacity drift" unless front.dig("agent","max_concurrent_agents") == [replicas * capacity, 1].max
   abort "poll interval drift" unless front.dig("polling","interval_ms") == 15_000
   abort "request pacing drift" unless front.dig("polling","request_interval_ms") == 2_500
   abort "Human Review must remain active" unless front.dig("tracker","active_states").include?("Human Review")
