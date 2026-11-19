@@ -54,12 +54,13 @@ Dir.mktmpdir do |dir|
   abort "same-issue post-merge repair rule missing" unless rendered_body.include?("Keep the issue in Merging through post-merge checks. Attach a repair PR to the\nsame issue and move to Done only after the final merged evidence is green.")
 
   front = YAML.safe_load(rendered.split("---\n", 3)[1], permitted_classes: [], aliases: false)
-  replicas = YAML.safe_load(File.read(desired)).dig("spec", "workers", "replicas")
+  desired_data = YAML.safe_load(File.read(desired))
+  replicas = desired_data.dig("spec", "workers", "replicas")
   abort "host count differs from replicas" unless front.dig("worker", "ssh_hosts").length == replicas
-  abort "global capacity differs from replicas" unless front.dig("agent", "max_concurrent_agents") == replicas
+  capacity = desired_data.dig("spec", "workers", "capacity_per_worker")
+  abort "global capacity differs from replicas" unless front.dig("agent", "max_concurrent_agents") == [replicas * capacity, 1].max
   abort "behavioral front matter changed" unless front.dig("tracker", "active_states") == ["Todo", "In Progress", "Merging"]
   provenance = JSON.parse(File.read(metadata))
-  desired_data = YAML.safe_load(File.read(desired))
   abort "metadata missing checksum" unless provenance.fetch("workflow_sha256").length == 64
   abort "fork provenance drift" unless provenance.fetch("symphony_revision") == desired_data.dig("spec", "symphony", "revision")
   abort "upstream provenance drift" unless provenance.fetch("symphony_upstream_revision") == desired_data.dig("spec", "symphony", "upstream_revision")
