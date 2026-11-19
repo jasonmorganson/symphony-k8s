@@ -85,7 +85,9 @@ config["worker"] ||= {}
 config["worker"]["ssh_hosts"] = hosts
 config["worker"]["max_concurrent_agents_per_host"] = capacity
 config["agent"] ||= {}
-config["agent"]["max_concurrent_agents"] = replicas * capacity
+# Symphony rejects zero concurrency even while it is suspended. With no SSH
+# hosts, one configured slot cannot start work but keeps the drain API online.
+config["agent"]["max_concurrent_agents"] = [replicas * capacity, 1].max
 config["server"] ||= {}
 config["server"]["host"] = spec.dig("server", "host")
 config["server"]["port"] = Integer(spec.dig("server", "port"))
