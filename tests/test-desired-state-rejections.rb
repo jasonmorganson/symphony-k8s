@@ -7,6 +7,11 @@ require "yaml"
 
 root = File.expand_path("..", __dir__)
 canonical = YAML.safe_load(File.read(File.join(root, "environments/production/desired-state.yaml")))
+canonical["spec"]["workers"]["replicas"] = 5
+canonical["spec"]["workers"]["node_pool"].merge!("min_nodes" => 3, "max_nodes" => 5)
+%w[orchestrator networking].each do |section|
+  canonical["spec"][section]["node_pool"].merge!("min_nodes" => 1, "max_nodes" => 1)
+end
 workflow = File.join(root, "tests/fixtures-workflow.md")
 fixture = "---\ntracker:\n  kind: linear\n---\npolicy body\n"
 
