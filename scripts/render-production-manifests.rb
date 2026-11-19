@@ -37,6 +37,7 @@ def named_container(workload, name)
 end
 
 named_container(orchestrator, "orchestrator")["image"] = images.fetch("orchestrator")
+orchestrator.dig("spec")["replicas"] = Integer(spec.dig("workers", "replicas")).zero? ? 0 : 1
 named_container(orchestrator, "orchestrator")["resources"] = spec.dig("orchestrator", "resources")
 orchestrator.dig("spec", "template", "spec")["nodeSelector"] = spec.dig("orchestrator", "node_selector")
 named_container(worker, "worker")["image"] = images.fetch("worker")
@@ -44,6 +45,7 @@ named_container(worker, "worker")["resources"] = spec.dig("workers", "resources"
 worker["spec"]["replicas"] = Integer(spec.dig("workers", "replicas"))
 worker.dig("spec", "template", "spec")["nodeSelector"] = spec.dig("workers", "node_selector")
 cloudflared_env = named_container(cloudflared, "cloudflared").fetch("env")
+cloudflared.dig("spec")["replicas"] = Integer(spec.dig("workers", "replicas")).zero? ? 0 : 1
 tunnel_token = cloudflared_env.find { |entry| entry["name"] == "TUNNEL_TOKEN" }
 abort "cloudflared is missing TUNNEL_TOKEN" unless tunnel_token
 tunnel_token.dig("valueFrom", "secretKeyRef")["name"] = spec.dig("networking", "cloudflare_tunnel_secret")
