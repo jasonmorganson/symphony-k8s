@@ -305,6 +305,8 @@ elif (( target < current )); then
     if Integer(replicas).zero?
       orchestrator=docs.find { |d| d["kind"]=="Deployment" && d.dig("metadata","name")=="symphony-orchestrator" }
       orchestrator["spec"]["replicas"]=1
+      tunnel=docs.find { |d| d["kind"]=="Deployment" && d.dig("metadata","name")=="cloudflared" }
+      tunnel["spec"]["replicas"]=1
     end
     File.write(path, docs.map { |d| YAML.dump(d) }.join("---\n"))
   ' "$temporary/reduced-hosts.yaml" "$current"
@@ -318,7 +320,18 @@ elif (( target < current )); then
     curl --fail --silent http://127.0.0.1:14000/api/v1/state > "$temporary/state.json" && break
     sleep 1
   done
-  [[ -s "$temporary/state.json" ]] || { echo "state API unavailable; refusing scale-down" >&2; exit 1; }
+  if [[ ! -s "$temporary/state.json" ]]; then
+    echo "state API unavailable; refusing scale-down" >&2
+    echo "port-forward diagnostics:" >&2
+    cat "$temporary/port-forward.log" >&2 || true
+    echo "orchestrator service endpoints:" >&2
+    kubectl -n "$namespace" get service symphony-orchestrator -o wide >&2 || true
+    kubectl -n "$namespace" get endpoints symphony-orchestrator -o wide >&2 || true
+    echo "orchestrator pods:" >&2
+    kubectl -n "$namespace" get pods -l app=symphony-orchestrator -o wide >&2 || true
+    kubectl -n "$namespace" logs deployment/symphony-orchestrator --tail=100 >&2 || true
+    exit 1
+  fi
   ruby "$repo_root/scripts/validate-scale-down.rb" "$desired" "$current" "$temporary/state.json"
 fi
 
